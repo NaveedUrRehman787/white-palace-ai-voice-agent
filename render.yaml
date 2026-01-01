@@ -60,7 +60,7 @@ services:
     runtime: docker
     dockerContext: ./frontend
     dockerfilePath: Dockerfile
-    plan: static
+    plan: starter
     envVars:
       - key: VITE_API_URL
         fromService:
