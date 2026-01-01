@@ -1,0 +1,130 @@
+# ============================================
+# White Palace Grill - Docker Compose
+# Complete stack: Agent + Backend + Database
+# ============================================
+
+version: '3.8'
+
+services:
+  # ==========================================
+  # LiveKit Voice Agent (MUST run 24/7)
+  # ==========================================
+  livekit-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    container_name: whitepalace-livekit-agent
+    restart: always
+    environment:
+      # LiveKit Cloud credentials
+      - LIVEKIT_URL=${LIVEKIT_URL}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      
+      # AI Provider API keys
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY}
+      - CARTESIA_API_KEY=${CARTESIA_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      
+      # Backend URL for function tools
+      - BACKEND_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - whitepalace-network
+    # Keep agent running and auto-restart
+    deploy:
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+
+  # ==========================================
+  # Flask Backend API
+  # ==========================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: whitepalace-backend
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=${SECRET_KEY}
+      - DATABASE_URL=${DATABASE_URL}
+      - LIVEKIT_URL=${LIVEKIT_URL}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    depends_on:
+      - postgres
+    networks:
+      - whitepalace-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ==========================================
+  # PostgreSQL Database
+  # ==========================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: whitepalace-postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-whitepalace}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-whitepalace123}
+      - POSTGRES_DB=${POSTGRES_DB:-whitepalace_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - whitepalace-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whitepalace}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # Frontend (Vite React)
+  # ==========================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: whitepalace-frontend
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_API_URL=http://backend:5000
+    depends_on:
+      - backend
+    networks:
+      - whitepalace-network
+
+# ==========================================
+# Networks
+# ==========================================
+networks:
+  whitepalace-network:
+    driver: bridge
+
+# ==========================================
+# Volumes
+# ==========================================
+volumes:
+  postgres_data:

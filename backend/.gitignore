@@ -1,0 +1,47 @@
+# Backend-specific environment files
+.env
+.env.local
+.env.*.local
+config/secrets.py
+config/keys.py
+config/local.py
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Instance folder (Flask)
+instance/
+
+# Coverage reports
+.coverage
+htmlcov/
+
+# PyCache
+__pycache__/
+*.pyc
+
+# Secrets and API keys
+*API_KEY*
+*SECRET*
+*TOKEN*
+*PASSWORD*
