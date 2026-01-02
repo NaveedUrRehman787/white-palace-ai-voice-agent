@@ -13,25 +13,37 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 # Database connection parameters
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'port': int(os.getenv('DB_PORT', 5432)),
-    'database': os.getenv('DB_NAME', 'white_palace_db'),
-    'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', 'password')
-}
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+if DATABASE_URL:
+    DB_CONFIG = {'url': DATABASE_URL}
+else:
+    DB_CONFIG = {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'port': int(os.getenv('DB_PORT', 5432)),
+        'database': os.getenv('DB_NAME', 'white_palace_db'),
+        'user': os.getenv('DB_USER', 'postgres'),
+        'password': os.getenv('DB_PASSWORD', 'password')
+    }
 
 # Create connection pool
 try:
-    connection_pool = SimpleConnectionPool(
-        minconn=1,
-        maxconn=20,
-        host=DB_CONFIG['host'],
-        port=DB_CONFIG['port'],
-        database=DB_CONFIG['database'],
-        user=DB_CONFIG['user'],
-        password=DB_CONFIG['password']
-    )
+    if DATABASE_URL:
+        connection_pool = SimpleConnectionPool(
+            minconn=1,
+            maxconn=20,
+            dsn=DATABASE_URL
+        )
+    else:
+        connection_pool = SimpleConnectionPool(
+            minconn=1,
+            maxconn=20,
+            host=DB_CONFIG['host'],
+            port=DB_CONFIG['port'],
+            database=DB_CONFIG['database'],
+            user=DB_CONFIG['user'],
+            password=DB_CONFIG['password']
+        )
     logger.info('✅ Database connection pool created')
 except Exception as e:
     logger.error(f'❌ Failed to create connection pool: {str(e)}')
