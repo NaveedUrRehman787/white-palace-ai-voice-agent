@@ -7,7 +7,7 @@ services:
     runtime: docker
     dockerContext: .
     dockerfilePath: Dockerfile.agent
-    region: oregon # Change to your preferred region
+    region: ohio # Change to your preferred region
     plan: starter # Agents need a persistent worker
     envVars:
       - key: LIVEKIT_URL
@@ -36,7 +36,7 @@ services:
     runtime: docker
     dockerContext: .
     dockerfilePath: Dockerfile.backend
-    region: oregon
+    region: ohio
     plan: starter
     healthCheckPath: /api/health
     envVars:
@@ -68,8 +68,8 @@ services:
     name: white-palace-frontend
     runtime: docker
     dockerContext: .
-    dockerfilePath: frontend/Dockerfile
-    region: oregon
+    dockerfilePath: Dockerfile.frontend
+    region: ohio
     plan: starter
     healthCheckPath: /
     envVars:
@@ -85,4 +85,4 @@ services:
 databases:
   - name: white-palace-db
     plan: free # Can be upgraded later
-    region: oregon
+    region: ohio
