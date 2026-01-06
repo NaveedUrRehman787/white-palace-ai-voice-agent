@@ -5,36 +5,6 @@
 
 services:
   # ==========================================
-  # PostgreSQL Database
-  # ==========================================
-  postgres:
-    image: postgres:15-alpine
-    container_name: whitepalace-postgres
-    restart: always
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-whitepalace}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Missing POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-whitepalace_db}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
-      - ./database/seed_menu_items.sql:/docker-entrypoint-initdb.d/02-seed.sql
-    ports:
-      - "5432:5432"
-    networks:
-      - whitepalace-network
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-whitepalace}" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # ==========================================
   # Flask Backend API
   # ==========================================
   backend:
@@ -48,7 +18,7 @@ services:
     environment:
       FLASK_ENV: production
       SECRET_KEY: ${SECRET_KEY:?Missing SECRET_KEY}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-whitepalace}:${POSTGRES_PASSWORD:?Missing POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-whitepalace_db}
+      DATABASE_URL: ${DATABASE_URL:?Missing DATABASE_URL}
       LIVEKIT_URL: ${LIVEKIT_URL:?Missing LIVEKIT_URL}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?Missing LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?Missing LIVEKIT_API_SECRET}
@@ -57,13 +27,16 @@ services:
       TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:?Missing TWILIO_PHONE_NUMBER}
       OPENAI_API_KEY: ${OPENAI_API_KEY:?Missing OPENAI_API_KEY}
       DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?Missing DEEPGRAM_API_KEY}
-    depends_on:
-      postgres:
-        condition: service_healthy
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET}
+      AWS_REGION: ${AWS_REGION}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      LOG_LEVEL: ${LOG_LEVEL}
+      ENABLE_REQUEST_LOGGING: ${ENABLE_REQUEST_LOGGING}
     networks:
       - whitepalace-network
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:5000/api/health" ]
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -132,10 +105,3 @@ services:
 networks:
   whitepalace-network:
     driver: bridge
-
-# ==========================================
-# Volumes
-# ==========================================
-volumes:
-  postgres_data:
-    driver: local
