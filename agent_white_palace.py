@@ -6,7 +6,7 @@ load_dotenv(".env")
 import asyncio
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, Optional, List
 from livekit.agents.voice.agent_session import SessionConnectOptions
 from livekit.agents.types import APIConnectOptions
@@ -23,7 +23,7 @@ from livekit.agents import (
     Agent,
     RunContext,
 )
-from livekit.plugins import openai, deepgram, cartesia, silero, elevenlabs, google
+from livekit.plugins import openai, deepgram, silero, elevenlabs, google
 from livekit.agents import AgentServer
 
 server = AgentServer()
@@ -38,11 +38,15 @@ class ConversationState:
         self.caller_phone = "+10000000000"
 
     def to_context(self) -> str:
+        now = datetime.now()
         return f"""
 CALL START TIME: {self.start_time.isoformat()}
-CALL DURATION: {(datetime.now() - self.start_time).seconds} seconds
+CALL DURATION: {(now - self.start_time).seconds} seconds
 CALLER PHONE: {self.caller_phone}
-CURRENT DATE & TIME: {datetime.now().strftime('%B %d, %Y %I:%M %p')}
+CURRENT DATE & TIME: {now.strftime('%B %d, %Y %I:%M %p')}
+CURRENT YEAR: {now.year}
+TODAY: {now.strftime('%Y-%m-%d')}
+TOMORROW: {(now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).strftime('%Y-%m-%d')}
 """
 
 class OrderItem(BaseModel):
@@ -164,31 +168,126 @@ async def check_reservation_availability(
 ) -> Dict:
     """
     Check if a reservation time slot is available. Always call this BEFORE creating a reservation.
-    
+
     Args:
         reservationDate: YYYY-MM-DD
         reservationTime: HH:MM (24-hour)
         partySize: Number of people
     """
     print(f"🔄 CHECK AVAILABILITY: {reservationDate} {reservationTime} for {partySize}")
-    
+
     payload = {
         "reservationDate": reservationDate,
         "reservationTime": reservationTime,
         "partySize": partySize
     }
-    
+
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{BACKEND_URL}/api/reservations/availability", json=payload, timeout=10) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    return data # Contains "available": True/False and "message"
+                    result = data.get("data", data)  # Handle different response formats
+
+                    # Add helpful suggestions if not available
+                    if not result.get("available", False):
+                        message = result.get("message", "Time not available")
+
+                        # If it's about advance notice, suggest alternatives
+                        if "15 minutes" in message or "advance" in message:
+                            alternatives = await suggest_alternative_times(reservationDate, reservationTime, partySize)
+                            if alternatives:
+                                result["alternatives"] = alternatives
+                                result["message"] = f"{message} Would you like to try {alternatives[0]} instead?"
+
+                        # If it's capacity issue, suggest nearby times
+                        elif "availability" in message.lower() or "full" in message.lower():
+                            alternatives = await suggest_alternative_times(reservationDate, reservationTime, partySize)
+                            if alternatives:
+                                result["alternatives"] = alternatives
+                                result["message"] = f"That time is fully booked. How about {alternatives[0]}?"
+
+                    return result
                 else:
                     return {"success": False, "available": False, "message": "Could not check availability."}
     except Exception as e:
         print(f"❌ AVAILABILITY ERROR: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "available": False, "message": "Sorry, I couldn't check availability right now."}
+
+async def suggest_alternative_times(reservation_date: str, reservation_time: str, party_size: int) -> List[str]:
+    """
+    Suggest alternative reservation times when the requested time is not available.
+
+    Args:
+        reservation_date: YYYY-MM-DD
+        reservation_time: HH:MM (24-hour)
+        party_size: Number of people
+
+    Returns:
+        List of suggested time strings in "H:MM PM" format
+    """
+    try:
+        # Parse the requested time
+        requested_hour = int(reservation_time.split(':')[0])
+        requested_minute = int(reservation_time.split(':')[1])
+
+        # Generate alternative times: ±15, ±30, ±45 minutes
+        time_offsets = [-45, -30, -15, 15, 30, 45]
+        alternatives = []
+
+        for offset in time_offsets:
+            new_minute = requested_minute + offset
+            new_hour = requested_hour
+
+            # Handle minute overflow/underflow
+            if new_minute >= 60:
+                new_hour += 1
+                new_minute -= 60
+            elif new_minute < 0:
+                new_hour -= 1
+                new_minute += 60
+
+            # Handle hour overflow (assume restaurant closes at 11 PM)
+            if new_hour >= 23:
+                continue
+            # Handle hour underflow (assume restaurant opens at 6 AM)
+            if new_hour < 6:
+                continue
+
+            # Format time
+            time_str = f"{new_hour:02d}:{new_minute:02d}"
+            
+            # Format for spoken response (e.g., "7:30 PM")
+            period = "AM" if new_hour < 12 else "PM"
+            display_hour = new_hour if new_hour <= 12 else new_hour - 12
+            if display_hour == 0: display_hour = 12
+            formatted_time = f"{display_hour}:{new_minute:02d} {period}"
+
+            # Check if this alternative time is available
+            payload = {
+                "reservationDate": reservation_date,
+                "reservationTime": time_str,
+                "partySize": party_size
+            }
+
+            try:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(f"{BACKEND_URL}/api/reservations/availability", json=payload, timeout=5) as resp:
+                        if resp.status == 200:
+                            data = await resp.json()
+                            result = data.get("data", data)
+                            if result.get("available", False):
+                                alternatives.append(formatted_time)
+                                if len(alternatives) >= 3:  # Only return 3 alternatives
+                                    break
+            except:
+                continue
+
+        return alternatives[:3]  # Return up to 3 alternatives
+
+    except Exception as e:
+        print(f"❌ ALTERNATIVE TIMES ERROR: {e}")
+        return []
 
 @llm.function_tool
 async def create_reservation(
@@ -249,21 +348,287 @@ async def transfer_to_human(
     """
     Transfer the call to a human staff member.
     Use this only when explicitly requested by the customer or for very complex issues.
-    
+
     Args:
         reason: Why transfer is needed
-    
+
     Returns:
         Dict with transfer status
     """
     print(f"🔀 TRANSFER REQUESTED: Reason={reason}")
-    
+
     return {
         "success": True,
         "message": "I'll connect you with a staff member at the restaurant for more help.",
         "reason": reason,
         "timestamp": datetime.now().isoformat()
     }
+
+@llm.function_tool
+async def gethours(context: RunContext) -> Dict:
+    """
+    Get the restaurant's operating hours.
+
+    Returns:
+        Dict with hours information
+    """
+    from backend.config.restaurant_config import RESTAURANT_CONFIG
+
+    print("🕒 GET HOURS REQUESTED")
+
+    hours = RESTAURANT_CONFIG.get("hours", {})
+    timezone = RESTAURANT_CONFIG.get("timezone", "America/Chicago")
+
+    # Format hours for response
+    formatted_hours = {}
+    for day, times in hours.items():
+        formatted_hours[day] = {
+            "open": times.get("open", "Closed"),
+            "close": times.get("close", "Closed")
+        }
+
+    return {
+        "success": True,
+        "hours": formatted_hours,
+        "timezone": timezone,
+        "message": "Here are our operating hours."
+    }
+
+@llm.function_tool
+async def getlocation(context: RunContext) -> Dict:
+    """
+    Get the restaurant's location and contact information.
+
+    Returns:
+        Dict with location information
+    """
+    from backend.config.restaurant_config import RESTAURANT_CONFIG
+
+    print("📍 GET LOCATION REQUESTED")
+
+    return {
+        "success": True,
+        "name": RESTAURANT_CONFIG.get("name"),
+        "address": RESTAURANT_CONFIG.get("address"),
+        "city": RESTAURANT_CONFIG.get("city"),
+        "state": RESTAURANT_CONFIG.get("state"),
+        "zip_code": RESTAURANT_CONFIG.get("zip_code"),
+        "phone": RESTAURANT_CONFIG.get("phone"),
+        "website": RESTAURANT_CONFIG.get("website"),
+        "email": RESTAURANT_CONFIG.get("email"),
+        "established_year": RESTAURANT_CONFIG.get("established_year"),
+        "message": f"We're located at {RESTAURANT_CONFIG.get('address')}, {RESTAURANT_CONFIG.get('city')}, {RESTAURANT_CONFIG.get('state')} {RESTAURANT_CONFIG.get('zip_code')}."
+    }
+
+@llm.function_tool
+async def get_order_by_orderNumber(
+    context: RunContext,
+    orderNumber: str
+) -> Dict:
+    """
+    Get order details by order number.
+
+    Args:
+        orderNumber: The order number to look up
+
+    Returns:
+        Dict with order information
+    """
+    print(f"🔍 GET ORDER: {orderNumber}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{BACKEND_URL}/api/orders/number/{orderNumber}", timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    order = data.get("data", {})
+                    return {
+                        "success": True,
+                        "order": order,
+                        "message": f"Found order {orderNumber}."
+                    }
+                else:
+                    return {"success": False, "error": f"Order {orderNumber} not found."}
+    except Exception as e:
+        print(f"❌ ORDER LOOKUP ERROR: {e}")
+        return {"success": False, "error": str(e)}
+
+@llm.function_tool
+async def update_order_status_by_orderNumber(
+    context: RunContext,
+    orderNumber: str,
+    status: str
+) -> Dict:
+    """
+    Update an order's status by order number.
+
+    Args:
+        orderNumber: The order number to update
+        status: New status ("confirmed", "preparing", "ready", "completed", "cancelled")
+
+    Returns:
+        Dict with update result
+    """
+    print(f"📝 UPDATE ORDER STATUS: {orderNumber} -> {status}")
+
+    payload = {"status": status}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.put(f"{BACKEND_URL}/api/orders/number/{orderNumber}/status", json=payload, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    order = data.get("data", {})
+                    return {
+                        "success": True,
+                        "order": order,
+                        "message": f"Order {orderNumber} status updated to {status}."
+                    }
+                else:
+                    err_text = await resp.text()
+                    return {"success": False, "error": f"Failed to update order {orderNumber}: {err_text}"}
+    except Exception as e:
+        print(f"❌ ORDER UPDATE ERROR: {e}")
+        return {"success": False, "error": str(e)}
+
+@llm.function_tool
+async def cancel_order_by_orderNumber(
+    context: RunContext,
+    orderNumber: str
+) -> Dict:
+    """
+    Cancel an order by order number.
+
+    Args:
+        orderNumber: The order number to cancel
+
+    Returns:
+        Dict with cancellation result
+    """
+    print(f"❌ CANCEL ORDER: {orderNumber}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(f"{BACKEND_URL}/api/orders/number/{orderNumber}", timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    order = data.get("data", {})
+                    return {
+                        "success": True,
+                        "order": order,
+                        "message": f"Order {orderNumber} has been cancelled."
+                    }
+                else:
+                    err_text = await resp.text()
+                    return {"success": False, "error": f"Failed to cancel order {orderNumber}: {err_text}"}
+    except Exception as e:
+        print(f"❌ ORDER CANCEL ERROR: {e}")
+        return {"success": False, "error": str(e)}
+
+@llm.function_tool
+async def get_reservation_by_reservationNumber(
+    context: RunContext,
+    reservationNumber: str
+) -> Dict:
+    """
+    Get reservation details by reservation number.
+
+    Args:
+        reservationNumber: The reservation number to look up
+
+    Returns:
+        Dict with reservation information
+    """
+    print(f"🔍 GET RESERVATION: {reservationNumber}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{BACKEND_URL}/api/reservations/number/{reservationNumber}", timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    reservation = data.get("data", {})
+                    return {
+                        "success": True,
+                        "reservation": reservation,
+                        "message": f"Found reservation {reservationNumber}."
+                    }
+                else:
+                    return {"success": False, "error": f"Reservation {reservationNumber} not found."}
+    except Exception as e:
+        print(f"❌ RESERVATION LOOKUP ERROR: {e}")
+        return {"success": False, "error": str(e)}
+
+@llm.function_tool
+async def update_reservation_status_by_reservationNumber(
+    context: RunContext,
+    reservationNumber: str,
+    status: str
+) -> Dict:
+    """
+    Update a reservation's status by reservation number.
+
+    Args:
+        reservationNumber: The reservation number to update
+        status: New status ("pending", "confirmed", "completed", "cancelled", "no_show")
+
+    Returns:
+        Dict with update result
+    """
+    print(f"📝 UPDATE RESERVATION STATUS: {reservationNumber} -> {status}")
+
+    payload = {"status": status}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.put(f"{BACKEND_URL}/api/reservations/number/{reservationNumber}/status", json=payload, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    reservation = data.get("data", {})
+                    return {
+                        "success": True,
+                        "reservation": reservation,
+                        "message": f"Reservation {reservationNumber} status updated to {status}."
+                    }
+                else:
+                    err_text = await resp.text()
+                    return {"success": False, "error": f"Failed to update reservation {reservationNumber}: {err_text}"}
+    except Exception as e:
+        print(f"❌ RESERVATION UPDATE ERROR: {e}")
+        return {"success": False, "error": str(e)}
+
+@llm.function_tool
+async def cancel_reservation_by_reservationNumber(
+    context: RunContext,
+    reservationNumber: str
+) -> Dict:
+    """
+    Cancel a reservation by reservation number.
+
+    Args:
+        reservationNumber: The reservation number to cancel
+
+    Returns:
+        Dict with cancellation result
+    """
+    print(f"❌ CANCEL RESERVATION: {reservationNumber}")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.delete(f"{BACKEND_URL}/api/reservations/number/{reservationNumber}", timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    reservation = data.get("data", {})
+                    return {
+                        "success": True,
+                        "reservation": reservation,
+                        "message": f"Reservation {reservationNumber} has been cancelled."
+                    }
+                else:
+                    err_text = await resp.text()
+                    return {"success": False, "error": f"Failed to cancel reservation {reservationNumber}: {err_text}"}
+    except Exception as e:
+        print(f"❌ RESERVATION CANCEL ERROR: {e}")
+        return {"success": False, "error": str(e)}
 
 # ============================================================================
 # SYSTEM PROMPT
@@ -292,10 +657,23 @@ async def entrypoint(ctx: JobContext):
 
     print(f"📞 Caller phone: {conversation_state.caller_phone}")
 
-    # Build system prompt with live state
+    # Build system prompt with live state and current datetime
+    now = datetime.now()
     system_prompt = RESTAURANT_SYSTEM_PROMPT.replace(
-        "{{conversation_state}}", 
+        "{{conversation_state}}",
         conversation_state.to_context()
+    ).replace(
+        "{{CURRENT_DATETIME}}", now.strftime('%Y-%m-%d %H:%M:%S')
+    ).replace(
+        "{{CURRENT_YEAR}}", str(now.year)
+    ).replace(
+        "{{TODAY}}", now.strftime('%Y-%m-%d')
+    ).replace(
+        "{{TOMORROW}}", (now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).strftime('%Y-%m-%d')
+    ).replace(
+        "{{CALLER_PHONE}}", conversation_state.caller_phone
+    ).replace(
+        "{{SESSION_ID}}", "local-console-session"
     )
 
     # Create agent with instructions and tools
@@ -306,7 +684,15 @@ async def entrypoint(ctx: JobContext):
             create_order,
             check_reservation_availability,
             create_reservation,
-            transfer_to_human
+            transfer_to_human,
+            gethours,
+            getlocation,
+            get_order_by_orderNumber,
+            update_order_status_by_orderNumber,
+            cancel_order_by_orderNumber,
+            get_reservation_by_reservationNumber,
+            update_reservation_status_by_reservationNumber,
+            cancel_reservation_by_reservationNumber
         ],
     )
 
@@ -318,21 +704,25 @@ async def entrypoint(ctx: JobContext):
             interim_results=True,
         ),
         llm=openai.LLM(
-            model="gpt-4o-mini",  # Faster model
+            model="gpt-4o-mini",
             timeout=60.0,
+            temperature=0.1,
+            max_completion_tokens=100, # 🔧 Keep responses short for lower latency
         ),
         tts=openai.TTS(
-            model="gpt-4o-mini-tts",
-            voice="alloy",
-            speed=1.0,
+            model="tts-1",
+            voice="alloy", # 🔧 Safer baseline for local testing
         ),
         vad=silero.VAD.load(
-            min_speech_duration=0.3,
-            min_silence_duration=0.8,
-            padding_duration=0.2,
-            activation_threshold=0.5,
+            min_speech_duration=0.15, 
+            min_silence_duration=0.5, 
+            prefix_padding_duration=0.2,
+            activation_threshold=0.3, # 🔧 More sensitive (less static/noise rejection)
+            max_buffered_speech=60.0,
         ),
+        
         allow_interruptions=True,
+        min_endpointing_delay=0.5, 
     )
 
     # Attach state to session for tool access
@@ -355,5 +745,3 @@ async def telephony_entrypoint(ctx: JobContext):
 
 if __name__ == "__main__":
     cli.run_app(server)
-
-

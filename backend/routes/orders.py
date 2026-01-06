@@ -18,6 +18,7 @@ from config.restaurant_config import RESTAURANT_CONFIG
 from middleware.error_handler import handle_exceptions, ValidationError
 from middleware.validators import validate_order_data, validate_phone_number
 from utils.helpers import generate_order_id, calculate_order_total, calculate_estimated_ready_time, clean_phone_number
+from utils.websocket_service import notify_order_update
 from datetime import datetime
 import logging
 import json
@@ -417,6 +418,12 @@ def update_order_status(order_id):
 
     logger.info(f"Order {updated['order_number']} status updated to {new_status}")
 
+    # Emit real-time update via WebSocket
+    try:
+        notify_order_update(order_id)
+    except Exception as e:
+        logger.error(f"Failed to emit order update: {e}")
+
     return (
         jsonify(
             {
@@ -453,6 +460,149 @@ def cancel_order(order_id):
     params = (
         ORDER_STATUS["CANCELLED"],
         order_id,
+        RESTAURANT_CONFIG["id"],
+        ORDER_STATUS["COMPLETED"],
+        ORDER_STATUS["CANCELLED"],
+    )
+
+    with get_db_cursor(dict_cursor=True) as cursor:
+        cursor.execute(sql, params)
+        cancelled = cursor.fetchone()
+
+    if not cancelled:
+        # Either not found or already completed/cancelled
+        raise ValidationError(ERROR_MESSAGES["ORDER_NOT_FOUND"], HTTP_STATUS["NOT_FOUND"])
+
+    logger.info(f"Order {cancelled['order_number']} cancelled")
+
+    return (
+        jsonify(
+            {
+                "status": "success",
+                "message": "Order cancelled",
+                "data": format_order(cancelled),
+            }
+        ),
+        HTTP_STATUS["OK"],
+    )
+
+
+# ============================================
+# GET /api/orders/number/<order_number> -> Get order by order number
+# ============================================
+@orders_bp.route('/number/<order_number>', methods=['GET'])
+@handle_exceptions
+def get_order_by_number(order_number):
+    """
+    Get a single order by order number.
+    """
+    sql = """
+        SELECT
+          id, restaurant_id, order_number, customer_phone, customer_name,
+          order_items, subtotal, tax, total_price, status, order_type,
+          special_requests, delivery_address, estimated_ready_time,
+          completed_at, created_at, updated_at
+        FROM orders
+        WHERE order_number = %s AND restaurant_id = %s
+    """
+    params = (order_number, RESTAURANT_CONFIG["id"])
+
+    order = execute_query(sql, params, fetch_one=True, fetch_all=False)
+    if not order:
+        raise ValidationError(ERROR_MESSAGES["ORDER_NOT_FOUND"], HTTP_STATUS["NOT_FOUND"])
+
+    return jsonify({"status": "success", "data": format_order(order)}), HTTP_STATUS["OK"]
+
+
+# ============================================
+# PUT /api/orders/number/<order_number>/status -> Update order status by number
+# ============================================
+@orders_bp.route('/number/<order_number>/status', methods=['PUT'])
+@handle_exceptions
+def update_order_status_by_number(order_number):
+    """
+    Update an order's status by order number.
+
+    JSON body:
+    {
+      "status": "confirmed" | "preparing" | "ready" | "completed" | "cancelled"
+    }
+    """
+    data = request.get_json() or {}
+    new_status = data.get("status", "").strip().lower()
+
+    valid_status_values = [v for v in ORDER_STATUS.values()]
+    if new_status not in valid_status_values:
+        raise ValidationError(
+            f"Invalid status. Valid options: {', '.join(valid_status_values)}",
+            HTTP_STATUS["BAD_REQUEST"],
+        )
+
+    # If moving to completed/cancelled, set completed_at
+    set_completed = new_status in [ORDER_STATUS["COMPLETED"], ORDER_STATUS["CANCELLED"]]
+
+    sql = """
+        UPDATE orders
+        SET status = %s,
+            completed_at = CASE
+                WHEN %s THEN CURRENT_TIMESTAMP
+                ELSE completed_at
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE order_number = %s AND restaurant_id = %s
+        RETURNING
+          id, restaurant_id, order_number, customer_phone, customer_name,
+          order_items, subtotal, tax, total_price, status, order_type,
+          special_requests, delivery_address, estimated_ready_time,
+          completed_at, created_at, updated_at
+    """
+    params = (new_status, set_completed, order_number, RESTAURANT_CONFIG["id"])
+
+    with get_db_cursor(dict_cursor=True) as cursor:
+        cursor.execute(sql, params)
+        updated = cursor.fetchone()
+
+    if not updated:
+        raise ValidationError(ERROR_MESSAGES["ORDER_NOT_FOUND"], HTTP_STATUS["NOT_FOUND"])
+
+    logger.info(f"Order {updated['order_number']} status updated to {new_status}")
+
+    return (
+        jsonify(
+            {
+                "status": "success",
+                "data": format_order(updated),
+            }
+        ),
+        HTTP_STATUS["OK"],
+    )
+
+
+# ============================================
+# DELETE /api/orders/number/<order_number> -> Cancel order by number
+# ============================================
+@orders_bp.route('/number/<order_number>', methods=['DELETE'])
+@handle_exceptions
+def cancel_order_by_number(order_number):
+    """
+    Cancel an order by order number (soft cancel by updating status to 'cancelled').
+    """
+    sql = """
+        UPDATE orders
+        SET status = %s,
+            completed_at = CURRENT_TIMESTAMP,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE order_number = %s AND restaurant_id = %s
+        AND status NOT IN (%s, %s)
+        RETURNING
+          id, restaurant_id, order_number, customer_phone, customer_name,
+          order_items, subtotal, tax, total_price, status, order_type,
+          special_requests, delivery_address, estimated_ready_time,
+          completed_at, created_at, updated_at
+    """
+    params = (
+        ORDER_STATUS["CANCELLED"],
+        order_number,
         RESTAURANT_CONFIG["id"],
         ORDER_STATUS["COMPLETED"],
         ORDER_STATUS["CANCELLED"],

@@ -1,13 +1,14 @@
 # ============================================
-# White Palace Grill - Vite React Frontend
-# Dockerfile for the web application
+# White Palace Grill - Frontend
+# Production-ready with Nginx
 # ============================================
 
-FROM node:20-alpine as builder
+# Stage 1: Build
+FROM node:18-alpine as build
 
 WORKDIR /app
 
-# Copy package files
+# Copy package files (Context is ./frontend)
 COPY package*.json ./
 
 # Install dependencies
@@ -19,16 +20,21 @@ COPY . .
 # Build for production
 RUN npm run build
 
-# Production stage with nginx
+# Stage 2: Runtime (Nginx)
 FROM nginx:alpine
 
-# Copy built files
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Copy built files from builder
+COPY --from=build /app/dist /usr/share/nginx/html
 
-# Copy nginx config
+# Copy nginx configuration
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose port
-EXPOSE 3000
+# Expose ports
+EXPOSE 80 443
 
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s \
+    CMD wget --quiet --tries=1 --spider http://localhost/ || exit 1
+
+# Start nginx
 CMD ["nginx", "-g", "daemon off;"]

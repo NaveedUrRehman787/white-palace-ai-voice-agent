@@ -4,7 +4,7 @@ PostgreSQL connection pool for White Palace Grill
 """
 
 import psycopg2
-from psycopg2.pool import SimpleConnectionPool
+from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.extras import RealDictCursor
 import os
 import logging
@@ -29,15 +29,15 @@ else:
 # Create connection pool
 try:
     if DATABASE_URL:
-        connection_pool = SimpleConnectionPool(
+        connection_pool = ThreadedConnectionPool(
             minconn=1,
-            maxconn=20,
+            maxconn=50, # Increased for production
             dsn=DATABASE_URL
         )
     else:
-        connection_pool = SimpleConnectionPool(
+        connection_pool = ThreadedConnectionPool(
             minconn=1,
-            maxconn=20,
+            maxconn=50, # Increased for production
             host=DB_CONFIG['host'],
             port=DB_CONFIG['port'],
             database=DB_CONFIG['database'],
@@ -73,9 +73,12 @@ def get_db_cursor(dict_cursor=False):
             cursor.execute(...)
     """
     conn = connection_pool.getconn()
+    cursor = None
     try:
-        cursor_class = RealDictCursor if dict_cursor else psycopg2.cursor
-        cursor = conn.cursor(cursor_factory=cursor_class)
+        if dict_cursor:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+        else:
+            cursor = conn.cursor()
         yield cursor
         conn.commit()
     except Exception as e:
@@ -83,7 +86,8 @@ def get_db_cursor(dict_cursor=False):
         logger.error(f'Database error: {str(e)}')
         raise
     finally:
-        cursor.close()
+        if cursor:
+            cursor.close()
         connection_pool.putconn(conn)
 
 def execute_query(sql, params=None, fetch_one=False, fetch_all=True):
@@ -119,8 +123,4 @@ def close_db():
         connection_pool.closeall()
         logger.info('Database pool closed')
 
-# Legacy function for compatibility
-def get_db():
-    """Get database connection"""
-    return connection_pool.getconn()
 

@@ -112,21 +112,71 @@ def get_agent_session() -> Optional[AgentSession]:
     """Get current agent session"""
     return agent_session
 
-async def start_voice_session(room_name: str, customer_phone: str = "anonymous") -> Optional[AgentSession]:
-    """Start voice session in LiveKit room"""
+# async def start_voice_session(room_name: str, customer_phone: str = "anonymous") -> Optional[AgentSession]:
+#     """Start voice session in LiveKit room"""
+#     try:
+#         session = create_agent_session(customer_phone)
+
+#         # Connect to LiveKit room
+#         await session.connect(room_name)
+#         logger.info(f"🔗 Connected to LiveKit room: {room_name}")
+
+#         return session
+
+#     except Exception as e:
+#         logger.error(f"❌ Failed to start voice session: {e}")
+#         return None
+
+# async def stop_voice_session():
+#     """Stop current voice session"""
+#     global agent_session
+#     if agent_session:
+#         try:
+#             await agent_session.disconnect()
+#             logger.info("🔌 Voice session stopped")
+#         except Exception as e:
+#             logger.error(f"Error stopping voice session: {e}")
+#         finally:
+#             agent_session = None
+
+# Initialize logging
+
+async def start_voice_session(room_name: str, customer_phone: str = "anonymous"):
+    """Start White Palace AI agent in LiveKit room"""
     try:
-        session = create_agent_session(customer_phone)
+        # Import from parent directory
+        import sys
+        import os
+        # sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        # from agent_white_palace import entrypoint as start_white_palace_agent
+        from agent_white_palace_local import entrypoint as start_white_palace_agent
+        # Create a mock job context for the agent
+        class MockJobContext:
+            def __init__(self, room_name, customer_phone):
+                self.room_name = room_name
+                self.customer_phone = customer_phone
 
-        # Connect to LiveKit room
-        await session.connect(room_name)
-        logger.info(f"🔗 Connected to LiveKit room: {room_name}")
+            async def connect(self):
+                pass  # Already connected via LiveKit
 
-        return session
+            @property
+            def room(self):
+                return MockRoom(room_name)
+
+        class MockRoom:
+            def __init__(self, name):
+                self.name = name
+
+        # Start the agent with the mock context
+        ctx = MockJobContext(room_name, customer_phone)
+        await start_white_palace_agent(ctx)
+
+        logger.info(f"🔗 White Palace agent connected to room: {room_name}")
+        return ctx  # Return context as session
 
     except Exception as e:
         logger.error(f"❌ Failed to start voice session: {e}")
         return None
-
 async def stop_voice_session():
     """Stop current voice session"""
     global agent_session
@@ -138,8 +188,6 @@ async def stop_voice_session():
             logger.error(f"Error stopping voice session: {e}")
         finally:
             agent_session = None
-
-# Initialize logging
 logging.basicConfig(level=logging.INFO)
 
 logger.info("🎙️ Restaurant Voice Pipeline initialized with LiveKit Agents")

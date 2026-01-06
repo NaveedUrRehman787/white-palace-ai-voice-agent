@@ -45,3 +45,4 @@ __pycache__/
 *SECRET*
 *TOKEN*
 *PASSWORD*
+secrets.env

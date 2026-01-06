@@ -94,11 +94,69 @@ CREATE TABLE reservations (
 );
 
 -- ============================================
+-- PAYMENTS TABLE
+-- ============================================
+CREATE TABLE payments (
+  id SERIAL PRIMARY KEY,
+  restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),
+  order_id INTEGER REFERENCES orders(id),
+  stripe_payment_intent_id VARCHAR(255) UNIQUE NOT NULL,
+  amount DECIMAL(10, 2) NOT NULL,
+  currency VARCHAR(3) DEFAULT 'USD',
+  status VARCHAR(50) NOT NULL,
+  payment_method VARCHAR(100),
+  customer_email VARCHAR(255),
+  metadata JSONB,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT check_payment_amount_positive CHECK (amount > 0),
+  CONSTRAINT valid_payment_status CHECK (status IN ('pending', 'processing', 'succeeded', 'failed', 'canceled', 'refunded'))
+);
+
+-- ============================================
+-- INVENTORY TABLE
+-- ============================================
+CREATE TABLE inventory (
+  id SERIAL PRIMARY KEY,
+  restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),
+  menu_item_id INTEGER NOT NULL REFERENCES menu_items(id),
+  current_stock INTEGER NOT NULL DEFAULT 0,
+  minimum_stock INTEGER DEFAULT 0,
+  unit VARCHAR(50) DEFAULT 'pieces',
+  last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT check_stock_non_negative CHECK (current_stock >= 0),
+  CONSTRAINT check_min_stock_non_negative CHECK (minimum_stock >= 0)
+);
+
+-- ============================================
+-- CUSTOMERS TABLE
+-- ============================================
+CREATE TABLE customers (
+  id INTEGER PRIMARY KEY,
+  restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),
+  phone VARCHAR(20) UNIQUE NOT NULL,
+  name VARCHAR(255),
+  email VARCHAR(255),
+  loyalty_points INTEGER DEFAULT 0,
+  total_orders INTEGER DEFAULT 0,
+  total_spent DECIMAL(10, 2) DEFAULT 0,
+  preferences JSONB,
+  last_order_at TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Grant permissions for customers table
+GRANT ALL PRIVILEGES ON TABLE customers TO whitepalace;
+
+-- ============================================
 -- CONVERSATIONS TABLE
 -- ============================================
 CREATE TABLE conversations (
   id SERIAL PRIMARY KEY,
   restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),
+  customer_id INTEGER REFERENCES customers(id),
   customer_phone VARCHAR(20) NOT NULL,
   user_message TEXT NOT NULL,
   ai_response TEXT NOT NULL,
@@ -157,4 +215,3 @@ INSERT INTO restaurants (
   'Iconic American diner serving classic comfort food since 1939. Famous for burgers, breakfast, and homemade pies.',
   1939
 );
-

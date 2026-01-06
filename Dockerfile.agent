@@ -1,56 +1,44 @@
 # ============================================
 # White Palace Grill - LiveKit Voice Agent
-# Dockerfile for the AI telephony agent
+# Production-grade Dockerfile
 # ============================================
 
-FROM python:3.12-slim
+FROM python:3.12-slim-bookworm
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PYTHONPATH=/app:/app/backend
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libffi-dev \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # Create app directory
 WORKDIR /app
 
-# Copy dependency files first (for better caching)
-COPY pyproject.toml ./
+# Copy unified requirements
 COPY requirements.txt ./
 
 # Install Python dependencies
-# Using pip with pyproject.toml dependencies
 RUN pip install --upgrade pip && \
-    pip install \
-    "livekit-agents>=1.0.0" \
-    "livekit-plugins-openai>=1.0.0" \
-    "livekit-plugins-deepgram>=1.0.0" \
-    "livekit-plugins-silero>=1.0.0" \
-    "livekit-plugins-cartesia>=1.0.0" \
-    "livekit-plugins-elevenlabs>=1.0.0" \
-    "livekit-plugins-google>=1.0.0" \
-    "aiohttp>=3.9.0" \
-    "pydantic>=2.0.0" \
-    "python-dotenv>=1.0.0"
+    pip install -r requirements.txt && \
+    pip install av==14.2.0 # 🔧 Key fix for audio stability in Docker
 
 # Copy application code
-# Only copy what's needed for the agent
+# Since agent_white_palace.py is in your root, we copy it directly
+COPY backend/ ./backend/
 COPY agent_white_palace.py ./
-COPY backend/prompt.py ./backend/
-
-# Create backend __init__.py if needed
-RUN mkdir -p backend && touch backend/__init__.py
 
 # Health check - verify agent can import
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD python -c "import agent_white_palace" || exit 1
 
-# Default command - start the agent in production mode
+# Entry point - start the agent in production worker mode
 CMD ["python", "agent_white_palace.py", "start"]

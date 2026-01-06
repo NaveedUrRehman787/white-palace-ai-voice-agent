@@ -13,6 +13,8 @@
   "dependencies": {
     "@livekit/components-react": "^2.9.17",
     "@livekit/components-styles": "^1.2.0",
+    "@stripe/react-stripe-js": "^5.4.1",
+    "@stripe/stripe-js": "^8.6.0",
     "axios": "^1.13.2",
     "framer-motion": "^12.23.26",
     "livekit-client": "^2.16.1",

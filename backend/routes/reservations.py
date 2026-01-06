@@ -573,7 +573,7 @@ def cancel_reservation(reservation_id):
 def check_availability():
     """
     Check if a reservation slot is available.
-    
+
     Expected JSON body:
     {
       "reservationDate": "2025-12-31",
@@ -582,27 +582,27 @@ def check_availability():
     }
     """
     data = request.get_json() or {}
-    
+
     reservation_date = data.get("reservationDate")
     reservation_time = data.get("reservationTime")
     party_size = data.get("partySize")
-    
+
     if not all([reservation_date, reservation_time, party_size]):
         raise ValidationError("reservationDate, reservationTime, and partySize are required", HTTP_STATUS["BAD_REQUEST"])
-        
+
     try:
         party_size = int(party_size)
-        
+
         # Check rules - if this passes, it's available
         # _check_reservation_rules raises ValidationError if not available
         _check_reservation_rules(reservation_date, reservation_time, party_size)
-        
+
         return jsonify({
             "status": "success",
             "available": True,
             "message": f"Great! We have availability for {party_size} guests on {reservation_date} at {reservation_time}."
         }), HTTP_STATUS["OK"]
-        
+
     except ValidationError as e:
         # If it's a validation error, it means likely not available or invalid params
         # We return success: true (API call worked) but available: false
@@ -618,3 +618,126 @@ def check_availability():
             "available": False,
             "message": "Could not check availability"
         }), HTTP_STATUS["INTERNAL_SERVER_ERROR"]
+
+
+# ============================================
+# GET /api/reservations/number/<reservation_number> -> Get reservation by number
+# ============================================
+@reservations_bp.route('/number/<reservation_number>', methods=['GET'])
+@handle_exceptions
+def get_reservation_by_number(reservation_number):
+    """
+    Get a single reservation by reservation number.
+    """
+    sql = """
+        SELECT
+          id, restaurant_id, reservation_number, customer_phone, customer_name,
+          customer_email, party_size, reservation_date, reservation_time,
+          status, special_requests, notes, created_at, updated_at
+        FROM reservations
+        WHERE reservation_number = %s AND restaurant_id = %s
+    """
+    params = (reservation_number, RESTAURANT_CONFIG["id"])
+
+    res = execute_query(sql, params, fetch_one=True, fetch_all=False)
+    if not res:
+        raise ValidationError(ERROR_MESSAGES["RESERVATION_NOT_FOUND"], HTTP_STATUS["NOT_FOUND"])
+
+    return jsonify({"status": "success", "data": format_reservation(res)}), HTTP_STATUS["OK"]
+
+
+# ============================================
+# PUT /api/reservations/number/<reservation_number>/status -> Update status by number
+# ============================================
+@reservations_bp.route('/number/<reservation_number>/status', methods=['PUT'])
+@handle_exceptions
+def update_reservation_status_by_number(reservation_number):
+    """
+    Update reservation status by reservation number.
+
+    JSON body:
+    {
+      "status": "confirmed" | "completed" | "cancelled" | "no_show"
+    }
+    """
+    data = request.get_json() or {}
+    new_status = data.get("status", "").strip().lower()
+
+    valid_status_values = [v for v in RESERVATION_STATUS.values()]
+    if new_status not in valid_status_values:
+        raise ValidationError(
+            f"Invalid status. Valid options: {', '.join(valid_status_values)}",
+            HTTP_STATUS["BAD_REQUEST"],
+        )
+
+    sql = """
+        UPDATE reservations
+        SET status = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE reservation_number = %s AND restaurant_id = %s
+        RETURNING
+          id, restaurant_id, reservation_number, customer_phone, customer_name,
+          customer_email, party_size, reservation_date, reservation_time,
+          status, special_requests, notes, created_at, updated_at
+    """
+    params = (new_status, reservation_number, RESTAURANT_CONFIG["id"])
+
+    with get_db_cursor(dict_cursor=True) as cursor:
+        cursor.execute(sql, params)
+        updated = cursor.fetchone()
+
+    if not updated:
+        raise ValidationError(ERROR_MESSAGES["RESERVATION_NOT_FOUND"], HTTP_STATUS["NOT_FOUND"])
+
+    logger.info(f"Reservation {updated['reservation_number']} status updated to {new_status}")
+
+    return jsonify({"status": "success", "data": format_reservation(updated)}), HTTP_STATUS["OK"]
+
+
+# ============================================
+# DELETE /api/reservations/number/<reservation_number> -> Cancel by number
+# ============================================
+@reservations_bp.route('/number/<reservation_number>', methods=['DELETE'])
+@handle_exceptions
+def cancel_reservation_by_number(reservation_number):
+    """
+    Cancel a reservation by reservation number (set status to 'cancelled').
+    """
+    sql = """
+        UPDATE reservations
+        SET status = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE reservation_number = %s AND restaurant_id = %s
+          AND status NOT IN (%s, %s)
+        RETURNING
+          id, restaurant_id, reservation_number, customer_phone, customer_name,
+          customer_email, party_size, reservation_date, reservation_time,
+          status, special_requests, notes, created_at, updated_at
+    """
+    params = (
+        RESERVATION_STATUS["CANCELLED"],
+        reservation_number,
+        RESTAURANT_CONFIG["id"],
+        RESERVATION_STATUS["COMPLETED"],
+        RESERVATION_STATUS["CANCELLED"],
+    )
+
+    with get_db_cursor(dict_cursor=True) as cursor:
+        cursor.execute(sql, params)
+        cancelled = cursor.fetchone()
+
+    if not cancelled:
+        raise ValidationError(ERROR_MESSAGES["RESERVATION_NOT_FOUND"], HTTP_STATUS["NOT_FOUND"])
+
+    logger.info(f"Reservation {cancelled['reservation_number']} cancelled")
+
+    return (
+        jsonify(
+            {
+                "status": "success",
+                "message": "Reservation cancelled",
+                "data": format_reservation(cancelled),
+            }
+        ),
+        HTTP_STATUS["OK"],
+    )

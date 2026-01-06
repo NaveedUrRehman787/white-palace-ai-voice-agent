@@ -256,7 +256,7 @@ function ReservationsList({ reservations, onUpdateStatus }) {
                     <div className="card-header">
                         <div className="header-left">
                             <span className="id-badge">#{res.reservationNumber}</span>
-                            <span className={`status-badge ${res.status}`}>{res.status}</span>
+                            <span className={`status-badge ${res.status}`}>{res.status.replace('_', ' ')}</span>
                         </div>
                         <div className="date-time">
                             <Calendar size={14} /> {res.reservationDate} <Clock size={14} /> {res.reservationTime}
@@ -276,32 +276,70 @@ function ReservationsList({ reservations, onUpdateStatus }) {
 
                     <div className="card-actions">
                         {res.status === 'pending' && (
-                            <button
-                                className="btn btn-sm btn-primary"
-                                onClick={() => onUpdateStatus(res.id, 'confirmed')}
-                            >
-                                Confirm
-                            </button>
+                            <>
+                                <button
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() => onUpdateStatus(res.id, 'confirmed')}
+                                >
+                                    Confirm
+                                </button>
+                                <button
+                                    className="btn btn-sm btn-danger-outline"
+                                    onClick={() => onUpdateStatus(res.id, 'cancelled')}
+                                >
+                                    Cancel
+                                </button>
+                            </>
                         )}
                         {res.status === 'confirmed' && (
+                            <>
+                                <button
+                                    className="btn btn-sm btn-success"
+                                    onClick={() => onUpdateStatus(res.id, 'arrived')}
+                                >
+                                    Guest Arrived
+                                </button>
+                                <button
+                                    className="btn btn-sm btn-warning"
+                                    onClick={() => onUpdateStatus(res.id, 'no_show')}
+                                >
+                                    No Show
+                                </button>
+                                <button
+                                    className="btn btn-sm btn-danger-outline"
+                                    onClick={() => onUpdateStatus(res.id, 'cancelled')}
+                                >
+                                    Cancel
+                                </button>
+                            </>
+                        )}
+                        {res.status === 'arrived' && (
+                            <>
+                                <button
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() => onUpdateStatus(res.id, 'seated')}
+                                >
+                                    Seat Guest
+                                </button>
+                                <button
+                                    className="btn btn-sm btn-danger-outline"
+                                    onClick={() => onUpdateStatus(res.id, 'cancelled')}
+                                >
+                                    Cancel
+                                </button>
+                            </>
+                        )}
+                        {res.status === 'seated' && (
                             <button
                                 className="btn btn-sm btn-success"
-                                onClick={() => onUpdateStatus(res.id, 'checked_in')}
-                            >
-                                Check In
-                            </button>
-                        )}
-                        {res.status === 'checked_in' && (
-                            <button
-                                className="btn btn-sm btn-secondary"
                                 onClick={() => onUpdateStatus(res.id, 'completed')}
                             >
                                 Complete
                             </button>
                         )}
-                        {res.status !== 'cancelled' && res.status !== 'completed' && (
+                        {res.status === 'no_show' && (
                             <button
-                                className="btn btn-sm btn-danger-outline"
+                                className="btn btn-sm btn-secondary"
                                 onClick={() => onUpdateStatus(res.id, 'cancelled')}
                             >
                                 Cancel

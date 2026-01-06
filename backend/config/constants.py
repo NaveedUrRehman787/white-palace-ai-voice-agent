@@ -85,7 +85,8 @@ ORDER_STATUS = {
 RESERVATION_STATUS = {
     'PENDING': 'pending',
     'CONFIRMED': 'confirmed',
-    'CHECKED_IN': 'checked_in',
+    'ARRIVED': 'arrived',
+    'SEATED': 'seated',
     'COMPLETED': 'completed',
     'CANCELLED': 'cancelled',
     'NO_SHOW': 'no_show'
@@ -115,4 +116,3 @@ LIVEKIT_CONFIG = {
     'GRANT_CAN_PUBLISH_SOURCES': ['microphone', 'screen_share'],
     'GRANT_INGEST': False
 }
-

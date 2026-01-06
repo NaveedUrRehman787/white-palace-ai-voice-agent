@@ -1,9 +1,14 @@
 import { useState } from 'react';
+import { Navigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Calendar, Users, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import axios from 'axios';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Reservations() {
+    const { isAuthenticated, loading: authLoading } = useAuth();
+    const location = useLocation();
+
     const [formData, setFormData] = useState({
         partySize: 2,
         reservationDate: new Date().toISOString().split('T')[0],
@@ -17,6 +22,29 @@ export default function Reservations() {
     const [message, setMessage] = useState('');
     const [loading, setLoading] = useState(false);
     const [success, setSuccess] = useState(false);
+
+    // Authentication guard - redirect to login if not authenticated
+    if (!authLoading && !isAuthenticated) {
+        return (
+            <Navigate
+                to="/login"
+                state={{ from: location }}
+                replace
+            />
+        );
+    }
+
+    // Show loading while checking authentication
+    if (authLoading) {
+        return (
+            <div className="min-h-screen bg-bg-dark flex items-center justify-center">
+                <div className="loading-state">
+                    <Loader2 className="animate-spin" size={24} />
+                    <span>Loading...</span>
+                </div>
+            </div>
+        );
+    }
 
     const checkAvailability = async (e) => {
         e.preventDefault();

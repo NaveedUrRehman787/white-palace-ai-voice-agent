@@ -1,11 +1,13 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
-import { ChefHat, Phone, Calendar, Menu as MenuIcon, X, ShoppingCart, Settings } from 'lucide-react';
+import { ChefHat, Phone, Calendar, Menu as MenuIcon, X, ShoppingCart, Settings, User, LogOut } from 'lucide-react';
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth } from '../contexts/AuthContext';
 
 export default function Layout() {
     const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const location = useLocation();
+    const { customer, isAuthenticated, logout } = useAuth();
 
     const navLinks = [
         { name: 'Home', path: '/', icon: <ChefHat size={18} /> },
@@ -40,6 +42,34 @@ export default function Layout() {
                         ))}
                     </div>
 
+                    {/* Auth Section */}
+                    <div className="auth-section desktop-only">
+                        {isAuthenticated ? (
+                            <div className="user-menu">
+                                <div className="user-info">
+                                    <User size={18} />
+                                    <span>{customer?.name || 'User'}</span>
+                                </div>
+                                <button
+                                    onClick={logout}
+                                    className="logout-btn"
+                                    title="Sign Out"
+                                >
+                                    <LogOut size={18} />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="auth-links">
+                                <Link to="/login" className="nav-link">
+                                    Sign In
+                                </Link>
+                                <Link to="/signup" className="btn btn-secondary">
+                                    Sign Up
+                                </Link>
+                            </div>
+                        )}
+                    </div>
+
                     {/* Mobile Menu Button */}
                     <button
                         className="mobile-menu-btn mobile-only"
@@ -70,6 +100,46 @@ export default function Layout() {
                                 {link.name}
                             </Link>
                         ))}
+
+                        {/* Mobile Auth Links */}
+                        <div className="mobile-auth-section">
+                            {isAuthenticated ? (
+                                <>
+                                    <div className="mobile-user-info">
+                                        <User size={18} />
+                                        <span>{customer?.name || 'User'}</span>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            logout();
+                                            setIsMobileMenuOpen(false);
+                                        }}
+                                        className="mobile-logout-btn"
+                                    >
+                                        <LogOut size={18} />
+                                        Sign Out
+                                    </button>
+                                </>
+                            ) : (
+                                <>
+                                    <Link
+                                        to="/login"
+                                        className="mobile-nav-link"
+                                        onClick={() => setIsMobileMenuOpen(false)}
+                                    >
+                                        <User size={18} />
+                                        Sign In
+                                    </Link>
+                                    <Link
+                                        to="/signup"
+                                        className="mobile-nav-link"
+                                        onClick={() => setIsMobileMenuOpen(false)}
+                                    >
+                                        Sign Up
+                                    </Link>
+                                </>
+                            )}
+                        </div>
                     </motion.div>
                 )}
             </AnimatePresence>
