@@ -73,19 +73,20 @@ def format_payment(payment_row):
 @payments_bp.route("/create-intent", methods=["POST"])
 @handle_exceptions
 def create_payment_intent():
-    data = request.get_json() or {}
-    amount = data.get("amount")
+    pass
+    # data = request.get_json() or {}
+    # amount = data.get("amount")
 
-    if not amount:
-        raise ValidationError("Amount is required", HTTP_STATUS["BAD_REQUEST"])
+    # if not amount:
+    #     raise ValidationError("Amount is required", HTTP_STATUS["BAD_REQUEST"])
 
-    # TEMP: bypass Stripe
-    fake_client_secret = "test_client_secret_no_payment"
+    # # TEMP: bypass Stripe
+    # fake_client_secret = "test_client_secret_no_payment"
 
-    return jsonify(
-        status="success",
-        data={"clientSecret": fake_client_secret}
-    ), HTTP_STATUS["OK"]
+    # return jsonify(
+    #     status="success",
+    #     data={"clientSecret": fake_client_secret}
+    # ), HTTP_STATUS["OK"]
 
 
 # @payments_bp.route('/create-intent', methods=['POST'])
