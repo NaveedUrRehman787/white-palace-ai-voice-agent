@@ -69,131 +69,150 @@ def format_payment(payment_row):
 # ============================================
 # POST /api/payments/create-intent
 # ============================================
-@payments_bp.route('/create-intent', methods=['POST'])
+
+@payments_bp.route("/create-intent", methods=["POST"])
 @handle_exceptions
 def create_payment_intent():
-    """
-    Create a Stripe payment intent for an order.
-
-    Expected JSON body:
-    {
-      "orderId": 123,
-      "amount": 25.95,
-      "currency": "USD",
-      "customerEmail": "customer@example.com",
-      "metadata": {"order_number": "ABC123"}
-    }
-
-    Returns:
-    {
-      "clientSecret": "...",
-      "paymentIntentId": "...",
-      "publishableKey": "..."
-    }
-    """
     data = request.get_json() or {}
-    order_id = data.get("orderId")
     amount = data.get("amount")
-    currency = data.get("currency", "USD").upper()
-    customer_email = data.get("customerEmail")
-    metadata = data.get("metadata", {})
 
-    if not order_id or not amount:
-        raise ValidationError("orderId and amount are required", HTTP_STATUS["BAD_REQUEST"])
+    if not amount:
+        raise ValidationError("Amount is required", HTTP_STATUS["BAD_REQUEST"])
 
-    if amount <= 0:
-        raise ValidationError("Amount must be greater than 0", HTTP_STATUS["BAD_REQUEST"])
+    # TEMP: bypass Stripe
+    fake_client_secret = "test_client_secret_no_payment"
 
-    # Verify order exists and is in correct status
-    order_sql = """
-        SELECT id, order_number, status, total_price, customer_name
-        FROM orders
-        WHERE id = %s AND restaurant_id = %s
-    """
-    order = execute_query(order_sql, (order_id, RESTAURANT_CONFIG["id"]), fetch_one=True)
+    return jsonify(
+        status="success",
+        data={"clientSecret": fake_client_secret}
+    ), HTTP_STATUS["OK"]
 
-    if not order:
-        raise ValidationError("Order not found", HTTP_STATUS["NOT_FOUND"])
 
-    if isinstance(order, dict):
-        order_status = order.get("status")
-        order_total = float(order.get("total_price", 0))
-        order_number = order.get("order_number")
-    else:
-        order_status = order[2]
-        order_total = float(order[4])
-        order_number = order[1]
+# @payments_bp.route('/create-intent', methods=['POST'])
+# @handle_exceptions
+# def create_payment_intent():
+#     """
+#     Create a Stripe payment intent for an order.
 
-    if order_status not in ["pending", "confirmed"]:
-        raise ValidationError("Order is not in a payable state", HTTP_STATUS["BAD_REQUEST"])
+#     Expected JSON body:
+#     {
+#       "orderId": 123,
+#       "amount": 25.95,
+#       "currency": "USD",
+#       "customerEmail": "customer@example.com",
+#       "metadata": {"order_number": "ABC123"}
+#     }
 
-    # Convert amount to cents for Stripe
-    amount_cents = int(amount * 100)
+#     Returns:
+#     {
+#       "clientSecret": "...",
+#       "paymentIntentId": "...",
+#       "publishableKey": "..."
+#     }
+#     """
+#     data = request.get_json() or {}
+#     order_id = data.get("orderId")
+#     amount = data.get("amount")
+#     currency = data.get("currency", "USD").upper()
+#     customer_email = data.get("customerEmail")
+#     metadata = data.get("metadata", {})
 
-    # Create payment intent metadata
-    intent_metadata = {
-        "order_id": str(order_id),
-        "order_number": order_number,
-        "restaurant_id": str(RESTAURANT_CONFIG["id"]),
-        **metadata
-    }
+#     if not order_id or not amount:
+#         raise ValidationError("orderId and amount are required", HTTP_STATUS["BAD_REQUEST"])
 
-    try:
-        # Create Stripe payment intent
-        intent = stripe.PaymentIntent.create(
-            amount=amount_cents,
-            currency=currency.lower(),
-            metadata=intent_metadata,
-            receipt_email=customer_email,
-            description=f"Order #{order_number} - White Palace Grill",
-            automatic_payment_methods={"enabled": True}
-        )
+#     if amount <= 0:
+#         raise ValidationError("Amount must be greater than 0", HTTP_STATUS["BAD_REQUEST"])
 
-        # Store payment record in database
-        payment_sql = """
-            INSERT INTO payments (
-              restaurant_id, order_id, stripe_payment_intent_id,
-              amount, currency, status, customer_email, metadata
-            ) VALUES (
-              %s, %s, %s, %s, %s, %s, %s, %s
-            )
-            RETURNING id
-        """
-        payment_params = (
-            RESTAURANT_CONFIG["id"],
-            order_id,
-            intent.id,
-            amount,
-            currency,
-            intent.status,
-            customer_email,
-            json.dumps(intent_metadata)
-        )
+#     # Verify order exists and is in correct status
+#     order_sql = """
+#         SELECT id, order_number, status, total_price, customer_name
+#         FROM orders
+#         WHERE id = %s AND restaurant_id = %s
+#     """
+#     order = execute_query(order_sql, (order_id, RESTAURANT_CONFIG["id"]), fetch_one=True)
 
-        with get_db_cursor() as cursor:
-            cursor.execute(payment_sql, payment_params)
-            payment_id = cursor.fetchone()[0]
+#     if not order:
+#         raise ValidationError("Order not found", HTTP_STATUS["NOT_FOUND"])
 
-        logger.info(f"Payment intent created: {intent.id} for order {order_number}")
+#     if isinstance(order, dict):
+#         order_status = order.get("status")
+#         order_total = float(order.get("total_price", 0))
+#         order_number = order.get("order_number")
+#     else:
+#         order_status = order[2]
+#         order_total = float(order[4])
+#         order_number = order[1]
 
-        return jsonify({
-            "status": "success",
-            "data": {
-                "paymentIntentId": intent.id,
-                "clientSecret": intent.client_secret,
-                "amount": amount,
-                "currency": currency,
-                "status": intent.status,
-                "publishableKey": os.getenv('STRIPE_PUBLISHABLE_KEY')
-            }
-        }), HTTP_STATUS["CREATED"]
+#     if order_status not in ["pending", "confirmed"]:
+#         raise ValidationError("Order is not in a payable state", HTTP_STATUS["BAD_REQUEST"])
 
-    except stripe.error.StripeError as e:
-        logger.error(f"Stripe error creating payment intent: {e}")
-        raise ValidationError(f"Payment processing error: {str(e)}", HTTP_STATUS["INTERNAL_SERVER_ERROR"])
-    except Exception as e:
-        logger.error(f"Error creating payment intent: {e}")
-        raise ValidationError("Failed to create payment intent", HTTP_STATUS["INTERNAL_SERVER_ERROR"])
+#     # Convert amount to cents for Stripe
+#     amount_cents = int(amount * 100)
+
+#     # Create payment intent metadata
+#     intent_metadata = {
+#         "order_id": str(order_id),
+#         "order_number": order_number,
+#         "restaurant_id": str(RESTAURANT_CONFIG["id"]),
+#         **metadata
+#     }
+
+#     try:
+#         # Create Stripe payment intent
+#         intent = stripe.PaymentIntent.create(
+#             amount=amount_cents,
+#             currency=currency.lower(),
+#             metadata=intent_metadata,
+#             receipt_email=customer_email,
+#             description=f"Order #{order_number} - White Palace Grill",
+#             automatic_payment_methods={"enabled": True}
+#         )
+
+#         # Store payment record in database
+#         payment_sql = """
+#             INSERT INTO payments (
+#               restaurant_id, order_id, stripe_payment_intent_id,
+#               amount, currency, status, customer_email, metadata
+#             ) VALUES (
+#               %s, %s, %s, %s, %s, %s, %s, %s
+#             )
+#             RETURNING id
+#         """
+#         payment_params = (
+#             RESTAURANT_CONFIG["id"],
+#             order_id,
+#             intent.id,
+#             amount,
+#             currency,
+#             intent.status,
+#             customer_email,
+#             json.dumps(intent_metadata)
+#         )
+
+#         with get_db_cursor() as cursor:
+#             cursor.execute(payment_sql, payment_params)
+#             payment_id = cursor.fetchone()[0]
+
+#         logger.info(f"Payment intent created: {intent.id} for order {order_number}")
+
+#         return jsonify({
+#             "status": "success",
+#             "data": {
+#                 "paymentIntentId": intent.id,
+#                 "clientSecret": intent.client_secret,
+#                 "amount": amount,
+#                 "currency": currency,
+#                 "status": intent.status,
+#                 "publishableKey": os.getenv('STRIPE_PUBLISHABLE_KEY')
+#             }
+#         }), HTTP_STATUS["CREATED"]
+
+#     except stripe.error.StripeError as e:
+#         logger.error(f"Stripe error creating payment intent: {e}")
+#         raise ValidationError(f"Payment processing error: {str(e)}", HTTP_STATUS["INTERNAL_SERVER_ERROR"])
+#     except Exception as e:
+#         logger.error(f"Error creating payment intent: {e}")
+#         raise ValidationError("Failed to create payment intent", HTTP_STATUS["INTERNAL_SERVER_ERROR"])
 
 # ============================================
 # POST /api/payments/webhook
