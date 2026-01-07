@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 payments_bp = Blueprint('payments', __name__)
 
 # Initialize Stripe
-# stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
-# STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 # ============================================
 # HELPER: FORMAT PAYMENT ROW
