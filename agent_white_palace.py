@@ -28,7 +28,9 @@ from livekit.agents import AgentServer
 
 server = AgentServer()
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:5000")
+# BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:5000")
+# For Docker environments, use the service name 'backend'
+BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:5000")
 
 class ConversationState:
     """Simple per-call state."""
@@ -109,23 +111,22 @@ async def create_order(
     items: List[OrderItem],
     orderType: str,
     customerName: str,
+    customerPhone: str,
     deliveryAddress: Optional[str] = None,
     specialRequests: Optional[str] = None
 ) -> Dict:
     """
-    Create a food order. Only call this when you have collected: items (with menuItemId, name, price, quantity), orderType, and customerName.
+    Create a food order. Only call this when you have collected: items (with menuItemId, name, price, quantity), orderType, customerName, and customerPhone.
     
     Args:
         items: List of order items
         orderType: "pickup", "delivery", or "dine-in"
         customerName: Name of customer
+        customerPhone: The customer's phone number
         deliveryAddress: Required if orderType is delivery
         specialRequests: Optional notes
     """
-    state = getattr(context.session, 'conversation_state', None)
-    customer_phone = state.caller_phone if state else "+10000000000"
-    
-    print(f"🔄 CREATE ORDER: {len(items)} items for {customerName} ({customer_phone})")
+    print(f"🔄 CREATE ORDER: {len(items)} items for {customerName} ({customerPhone})")
     
     # Convert Pydantic models to dicts
     items_dicts = [item.model_dump() for item in items]
@@ -134,7 +135,7 @@ async def create_order(
         "items": items_dicts,
         "orderType": orderType,
         "customerName": customerName,
-        "customerPhone": customer_phone,
+        "customerPhone": customerPhone,
         "deliveryAddress": deliveryAddress,
         "specialRequests": specialRequests
     }
@@ -296,6 +297,7 @@ async def create_reservation(
     reservationDate: str,
     reservationTime: str,
     customerName: str,
+    customerPhone: str,
     specialRequests: Optional[str] = None
 ) -> Dict:
     """
@@ -306,19 +308,17 @@ async def create_reservation(
         reservationDate: YYYY-MM-DD
         reservationTime: HH:MM (24-hour)
         customerName: Name of customer
+        customerPhone: The customer's phone number
         specialRequests: Optional notes
     """
-    state = getattr(context.session, 'conversation_state', None)
-    customer_phone = state.caller_phone if state else "+10000000000"
-    
-    print(f"🔄 CREATE RESERVATION: {partySize} ppl on {reservationDate} at {reservationTime}")
+    print(f"🔄 CREATE RESERVATION: {partySize} ppl on {reservationDate} at {reservationTime} for {customerName}")
     
     payload = {
         "partySize": partySize,
         "reservationDate": reservationDate,
         "reservationTime": reservationTime,
         "customerName": customerName,
-        "customerPhone": customer_phone,
+        "customerPhone": customerPhone,
         "specialRequests": specialRequests
     }
     
@@ -365,7 +365,7 @@ async def transfer_to_human(
     }
 
 @llm.function_tool
-async def gethours(context: RunContext) -> Dict:
+async def get_hours(context: RunContext) -> Dict:
     """
     Get the restaurant's operating hours.
 
@@ -395,7 +395,7 @@ async def gethours(context: RunContext) -> Dict:
     }
 
 @llm.function_tool
-async def getlocation(context: RunContext) -> Dict:
+async def get_location(context: RunContext) -> Dict:
     """
     Get the restaurant's location and contact information.
 
@@ -421,7 +421,7 @@ async def getlocation(context: RunContext) -> Dict:
     }
 
 @llm.function_tool
-async def get_order_by_orderNumber(
+async def get_order_by_number(
     context: RunContext,
     orderNumber: str
 ) -> Dict:
@@ -429,7 +429,7 @@ async def get_order_by_orderNumber(
     Get order details by order number.
 
     Args:
-        orderNumber: The order number to look up
+        orderNumber: The order number to look up (e.g., OR-12345)
 
     Returns:
         Dict with order information
@@ -492,7 +492,7 @@ async def update_order_status_by_orderNumber(
         return {"success": False, "error": str(e)}
 
 @llm.function_tool
-async def cancel_order_by_orderNumber(
+async def cancel_order_by_number(
     context: RunContext,
     orderNumber: str
 ) -> Dict:
@@ -526,7 +526,7 @@ async def cancel_order_by_orderNumber(
         return {"success": False, "error": str(e)}
 
 @llm.function_tool
-async def get_reservation_by_reservationNumber(
+async def get_reservation_by_number(
     context: RunContext,
     reservationNumber: str
 ) -> Dict:
@@ -597,7 +597,7 @@ async def update_reservation_status_by_reservationNumber(
         return {"success": False, "error": str(e)}
 
 @llm.function_tool
-async def cancel_reservation_by_reservationNumber(
+async def cancel_reservation_by_number(
     context: RunContext,
     reservationNumber: str
 ) -> Dict:
@@ -685,14 +685,14 @@ async def entrypoint(ctx: JobContext):
             check_reservation_availability,
             create_reservation,
             transfer_to_human,
-            gethours,
-            getlocation,
-            get_order_by_orderNumber,
+            get_hours,
+            get_location,
+            get_order_by_number,
             update_order_status_by_orderNumber,
-            cancel_order_by_orderNumber,
-            get_reservation_by_reservationNumber,
+            cancel_order_by_number,
+            get_reservation_by_number,
             update_reservation_status_by_reservationNumber,
-            cancel_reservation_by_reservationNumber
+            cancel_reservation_by_number
         ],
     )
 
