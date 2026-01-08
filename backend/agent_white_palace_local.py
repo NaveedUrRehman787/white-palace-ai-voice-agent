@@ -23,7 +23,7 @@ from livekit.agents import (
     Agent,
     RunContext,
 )
-from livekit.plugins import openai, deepgram, silero, elevenlabs, google
+from livekit.plugins import openai, deepgram, silero, elevenlabs, google, cartesia
 from livekit.agents import AgentServer
 
 server = AgentServer()
@@ -707,22 +707,23 @@ async def entrypoint(ctx: JobContext):
             model="gpt-4o-mini",
             timeout=60.0,
             temperature=0.1,
-            max_completion_tokens=100, # 🔧 Keep responses short for lower latency
+            max_completion_tokens=100, 
         ),
-        tts=openai.TTS(
-            model="tts-1",
-            voice="alloy", # 🔧 Safer baseline for local testing
+        # 🏎️ Use Cartesia for ultra-low latency TTS (faster than OpenAI/ElevenLabs)
+        tts=cartesia.TTS(
+            model="sonic-english",
+            voice="794f9389-aac1-45b6-b726-9d9369183238", # British Housekeeper (clear for telephony)
         ),
         vad=silero.VAD.load(
-            min_speech_duration=0.15, 
-            min_silence_duration=0.5, 
-            prefix_padding_duration=0.2,
-            activation_threshold=0.3, # 🔧 More sensitive (less static/noise rejection)
+            min_speech_duration=0.1, 
+            min_silence_duration=0.2, # 🏎️ Faster response after you stop speaking
+            prefix_padding_duration=0.1,
+            activation_threshold=0.3, 
             max_buffered_speech=60.0,
         ),
         
         allow_interruptions=True,
-        min_endpointing_delay=0.5, 
+        min_endpointing_delay=0.05, # 🏎️ Near-instant handover to LLM
     )
 
     # Attach state to session for tool access
