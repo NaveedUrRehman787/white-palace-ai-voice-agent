@@ -701,29 +701,55 @@ async def entrypoint(ctx: JobContext):
         stt=deepgram.STT(
             model="nova-2-phonecall",
             language="en-US",
-            interim_results=True,
+            interim_results=False,  # Skip interim
         ),
         llm=openai.LLM(
-            model="gpt-4o-mini",
-            timeout=20.0,
+            model="gpt-3.5-turbo",
+            timeout=12.0,
             temperature=0.1,
-            max_completion_tokens=64, # 🔧 Keep responses short for lower latency
+            max_completion_tokens=60,
         ),
-        tts=openai.TTS(
-            model="tts-1",
-            voice="alloy", # 🔧 Safer baseline for local testing
+        tts=google.TTS(
+            model_name="en-US-Neural2-C",
+            speaking_rate=1.0,
+            pitch=0.0,
         ),
         vad=silero.VAD.load(
-            min_speech_duration=0.01, 
-            min_silence_duration=0.1, 
-            prefix_padding_duration=0.2,
-            activation_threshold=0.3, # 🔧 More sensitive (less static/noise rejection)
-            max_buffered_speech=60.0,
+            min_speech_duration=0.15,
+            min_silence_duration=0.2,
+            activation_threshold=0.4,
+            max_buffered_speech=25.0,
         ),
-        
         allow_interruptions=True,
-        min_endpointing_delay=0.01, 
+        min_endpointing_delay=0.1,
     )
+    # session = AgentSession(
+    #     stt=deepgram.STT(
+    #         model="nova-2-phonecall",
+    #         language="en-US",
+    #         interim_results=True,
+    #     ),
+    #     llm=openai.LLM(
+    #         model="gpt-4o-mini",
+    #         timeout=20.0,
+    #         temperature=0.1,
+    #         max_completion_tokens=64, # 🔧 Keep responses short for lower latency
+    #     ),
+    #     tts=openai.TTS(
+    #         model="tts-1",
+    #         voice="alloy", # 🔧 Safer baseline for local testing
+    #     ),
+    #     vad=silero.VAD.load(
+    #         min_speech_duration=0.01, 
+    #         min_silence_duration=0.1, 
+    #         prefix_padding_duration=0.2,
+    #         activation_threshold=0.3, # 🔧 More sensitive (less static/noise rejection)
+    #         max_buffered_speech=60.0,
+    #     ),
+        
+    #     allow_interruptions=True,
+    #     min_endpointing_delay=0.01, 
+    # )
 
     # Attach state to session for tool access
     session.conversation_state = conversation_state
