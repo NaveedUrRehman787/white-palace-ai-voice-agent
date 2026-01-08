@@ -709,10 +709,11 @@ async def entrypoint(ctx: JobContext):
             temperature=0.1,
             max_completion_tokens=60,
         ),
-          tts=elevenlabs.TTS(
-        model="eleven_turbo_v2_5",
-        voice_id="EXAVITQu4vr4xnSDxMaL"
-    ),
+          tts=google.TTS(
+        model="en-US-Neural2-C",  # Google's best voice
+        speaking_rate=1.0,
+        pitch=0.0,
+        ),
         vad=silero.VAD.load(
             min_speech_duration=0.15,
             min_silence_duration=0.2,   
