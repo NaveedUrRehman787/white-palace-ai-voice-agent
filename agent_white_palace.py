@@ -695,6 +695,8 @@ async def entrypoint(ctx: JobContext):
             cancel_reservation_by_number
         ],
     )
+    
+
 
 #
     # Create session with STT/LLM/TTS
@@ -735,20 +737,16 @@ async def entrypoint(ctx: JobContext):
         ),
 
         llm=openai.LLM(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1",
             timeout=12.0,
             temperature=0.1,
             max_completion_tokens=60,
         ),
-        tts=google.TTS(
-        model="en-US-Neural2-C",  # Google's best voice
-        speaking_rate=1.0,
-        pitch=0.0,
+        tts=elevenlabs.TTS(
+            model_id="elevenlabs/eleven_monolingual_v2_22050",
+            voice="elevenlabs/eleven_monolingual_v2_22050",
+            language="en-US",
         ),
-    #     tts=elevenlabs.TTS(
-    #     model="eleven_turbo_v2_5",
-    #     voice_id="EXAVITQu4vr4xnSDxMaL"
-    # ),
         vad=silero.VAD.load(
             min_speech_duration=0.05,
             min_silence_duration=0.02,
