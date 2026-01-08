@@ -696,110 +696,63 @@ async def entrypoint(ctx: JobContext):
         ],
     )
 
-#    session = AgentSession(
-#         stt=deepgram.STT(
-#             model="nova-2-phonecall",
-#             language="en-US",
-#             interim_results=True,
-#         ),
-#         llm=openai.LLM(
-#             model="gpt-4o-mini",
-#             timeout=60.0,
-#             temperature=0.1,
-#             max_completion_tokens=100, 
-#         ),
-#         # 🏎️ Use Cartesia for ultra-low latency TTS (faster than OpenAI/ElevenLabs)
-#         tts=cartesia.TTS(
-#             model="sonic-english",
-#             voice="794f9389-aac1-45b6-b726-9d9369183238", # British Housekeeper (clear for telephony)
-#         ),
-#         vad=silero.VAD.load(
-#             min_speech_duration=0.1, 
-#             min_silence_duration=0.2, # 🏎️ Faster response after you stop speaking
-#             prefix_padding_duration=0.1,
-#             activation_threshold=0.3, 
-#             max_buffered_speech=60.0,
-#         ),
-        
-#         allow_interruptions=True,
-#         min_endpointing_delay=0.05, # 🏎️ Near-instant handover to LLM
-#     )
+#
     # Create session with STT/LLM/TTS
+    # session = AgentSession(
+    #     stt=deepgram.STT(
+    #         model="nova-2-phonecall",
+    #         language="en-US",
+    #         interim_results=True,
+    #     ),
+    #     llm=openai.LLM(
+    #         model="gpt-4o-mini",
+    #         timeout=20.0,
+    #         temperature=0.1,
+    #         max_completion_tokens=64, # 🔧 Keep responses short for lower latency
+    #     ),
+    #     tts=openai.TTS(
+    #         model="tts-1",
+    #         voice="alloy", # 🔧 Safer baseline for local testing
+    #     ),
+    #     vad=silero.VAD.load(
+    #         min_speech_duration=0.05, 
+    #         min_silence_duration=0.2, 
+    #         prefix_padding_duration=0.05,
+    #         activation_threshold=0.25, # 🔧 More sensitive (less static/noise rejection)
+    #         max_buffered_speech=30.0,
+    #     ),
+        
+    #     allow_interruptions=True,
+    #     min_endpointing_delay=0.05, 
+    # )
+
+
     session = AgentSession(
         stt=deepgram.STT(
             model="nova-2-phonecall",
             language="en-US",
-            interim_results=True,
+            interim_results=False,  # Skip interim
         ),
         llm=openai.LLM(
-            model="gpt-4o-mini",
-            timeout=20.0,
+            model="gpt-3.5-turbo",
+            timeout=12.0,
             temperature=0.1,
-            max_completion_tokens=64, # 🔧 Keep responses short for lower latency
+            max_completion_tokens=60,
         ),
-        tts=openai.TTS(
-            model="tts-1",
-            voice="alloy", # 🔧 Safer baseline for local testing
+        tts=google.TTS(
+            model_name="en-US-Neural2-C",
+            speaking_rate=1.0,
+            pitch=0.0,
         ),
         vad=silero.VAD.load(
-            min_speech_duration=0.05, 
-            min_silence_duration=0.2, 
-            prefix_padding_duration=0.05,
-            activation_threshold=0.25, # 🔧 More sensitive (less static/noise rejection)
-            max_buffered_speech=30.0,
+            min_speech_duration=0.15,
+            min_silence_duration=0.2,
+            activation_threshold=0.4,
+            max_buffered_speech=25.0,
         ),
-        
         allow_interruptions=True,
-        min_endpointing_delay=0.05, 
+        min_endpointing_delay=0.1,
     )
-
-#     session = AgentSession(
-#     # ---------------------------
-#     # 🎙️ Speech-to-Text (Fast)
-#     # ---------------------------
-#     stt=deepgram.STT(
-#         model="nova-2-phonecall",   # already optimized for telephony
-#         language="en-US",
-#         interim_results=True,       # REQUIRED for low latency
-#     ),
-
-#     # ---------------------------
-#     # 🧠 LLM (Fast response)
-#     # ---------------------------
-#     llm=openai.LLM(
-#         model="gpt-4o-mini",        # fastest OpenAI reasoning model
-#         timeout=20.0,               # fail fast if upstream stalls
-#         temperature=0.0,            # deterministic = faster
-#         max_completion_tokens=64,   # 🔥 key latency win
-#         # stream=True,              # enable if your SDK version supports it
-#     ),
-
-#     # ---------------------------
-#     # 🔊 Text-to-Speech (Fast start)
-#     # ---------------------------
-#     tts=openai.TTS(
-#         model="tts-1",              # lower latency than tts-1-hd
-#         voice="alloy",
-#         # stream=True,              # enable if supported → speak on first tokens
-#     ),
-
-#     # ---------------------------
-#     # 🎧 Voice Activity Detection (Aggressive)
-#     # ---------------------------
-#     vad=silero.VAD.load(
-#         min_speech_duration=0.05,    # detect speech almost instantly
-#         min_silence_duration=0.2,    # 🔥 biggest latency reducer
-#         prefix_padding_duration=0.05,
-#         activation_threshold=0.25,   # slightly more sensitive
-#         max_buffered_speech=30.0,
-#     ),
-
-#     # ---------------------------
-#     # ⚡ Turn handling
-#     # ---------------------------
-#     allow_interruptions=True,       # barge-in support
-#     min_endpointing_delay=0.05,     # 🔥 start thinking immediately
-# )
 
 
     # Attach state to session for tool access

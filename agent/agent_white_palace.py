@@ -714,15 +714,15 @@ async def entrypoint(ctx: JobContext):
             voice="alloy", # 🔧 Safer baseline for local testing
         ),
         vad=silero.VAD.load(
-            min_speech_duration=0.05, 
-            min_silence_duration=0.2, 
+            min_speech_duration=0.01, 
+            min_silence_duration=0.1, 
             prefix_padding_duration=0.2,
             activation_threshold=0.3, # 🔧 More sensitive (less static/noise rejection)
             max_buffered_speech=60.0,
         ),
         
         allow_interruptions=True,
-        min_endpointing_delay=0.05, 
+        min_endpointing_delay=0.01, 
     )
 
     # Attach state to session for tool access
