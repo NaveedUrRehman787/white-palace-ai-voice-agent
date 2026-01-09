@@ -32,6 +32,8 @@ livekit-plugins-elevenlabs>=1.3.0
 livekit-plugins-google>=1.3.0
 livekit-plugins-aws>=1.3.0
 
+
+
 # --- Provider SDKs ---
 openai>=1.0.0
 deepgram-sdk>=3.0.0
