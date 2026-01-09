@@ -23,7 +23,7 @@ from livekit.agents import (
     Agent,
     RunContext,
 )
-from livekit.plugins import openai, deepgram, silero, elevenlabs, google
+from livekit.plugins import openai, deepgram, silero, elevenlabs, google, aws
 from livekit.agents import AgentServer
 
 server = AgentServer()
@@ -697,6 +697,14 @@ async def entrypoint(ctx: JobContext):
     )
     
 
+    # ✨ USE NOVA SONIC - Just this one line!
+    session = AgentSession(
+        llm=aws.realtime.RealtimeModel(
+            voice="matthew",  # Professional female voice
+            region=os.getenv("AWS_REGION", "us-east-1"),
+        ),
+    )
+
 
 #
     # Create session with STT/LLM/TTS
@@ -729,33 +737,31 @@ async def entrypoint(ctx: JobContext):
     # )
 
 
-    session = AgentSession(
-        stt=deepgram.STT(
-            model="nova-2-phonecall",
-            language="en-US",
-            interim_results=False,  # Skip interim
-        ),
+    # session = AgentSession(
+    #     stt=deepgram.STT(
+    #         model="nova-2",
+    #         language="en-US",
+    #         interim_results=True,  # Skip interim
+    #     ),
 
-        llm=openai.LLM(
-            model="gpt-4.1",
-            timeout=12.0,
-            temperature=0.1,
-            max_completion_tokens=60,
-        ),
-        tts=elevenlabs.TTS(
-            model_id="elevenlabs/eleven_monolingual_v2_22050",
-            voice="elevenlabs/eleven_monolingual_v2_22050",
-            language="en-US",
-        ),
-        vad=silero.VAD.load(
-            min_speech_duration=0.05,
-            min_silence_duration=0.02,
-            activation_threshold=0.4,
-            max_buffered_speech=25.0,
-        ),
-        allow_interruptions=True,
-        min_endpointing_delay=0.1,
-    )
+    #     llm=openai.LLM(
+    #         model="gpt-4.1",
+    #         timeout=12.0,
+    #         temperature=0.1,
+    #         max_completion_tokens=60,
+    #     ),
+    #      tts=deepgram.TTS(
+    #         model="nova-2",
+    #     ),
+    #     vad=silero.VAD.load(
+    #         min_speech_duration=0.05,
+    #         min_silence_duration=0.02,
+    #         activation_threshold=0.4,
+    #         max_buffered_speech=25.0,
+    #     ),
+    #     allow_interruptions=True,
+    #     min_endpointing_delay=0.1,
+    # )
 
 
     # Attach state to session for tool access
@@ -765,10 +771,10 @@ async def entrypoint(ctx: JobContext):
     await session.start(room=ctx.room, agent=restaurant_agent)
 
     # Opening greeting
-    await session.say(
-        "Hi, thanks for calling White Palace Grill. "
-        "How can I help you today with an order or a reservation?"
-    )
+    # await session.say(
+    #     "Hi, thanks for calling White Palace Grill. "
+    #     "How can I help you today with an order or a reservation?"
+    # )
 
     print("✅ Agent started and ready")
 
