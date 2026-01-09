@@ -696,35 +696,42 @@ async def entrypoint(ctx: JobContext):
         ],
     )
 
-    # Create session with STT/LLM/TTS
     session = AgentSession(
-        stt=deepgram.STT(
-            model="nova-2-phonecall",
-            language="en-US",
-            interim_results=True,  # Skip interim
-            smart_format=True,
-            endpointing_ms=300,
-            
+        llm=aws.realtime.RealtimeModel(
+            voice="matthew",  # Professional female voice
+            region=os.getenv("AWS_REGION", "us-east-1"),
         ),
-        llm=openai.LLM(
-            model="gpt-3.5-turbo",
-            timeout=12.0,
-            temperature=0.1,
-            max_completion_tokens=60,
-        ),
-          tts=elevenlabs.TTS(
-              model="eleven_turbo_v2_5",
-              voice_id="EXAVITQu4vr4xnSDxMaL",  # "Rachel" voice
-          ),
-        vad=silero.VAD.load(
-            min_speech_duration=0.15,
-            min_silence_duration=0.2,   
-            activation_threshold=0.4,
-            max_buffered_speech=25.0,
-        ),
-        allow_interruptions=True,
-        min_endpointing_delay=0.1,
     )
+
+    # Create session with STT/LLM/TTS
+    # session = AgentSession(
+    #     stt=deepgram.STT(
+    #         model="nova-2-phonecall",
+    #         language="en-US",
+    #         interim_results=True,  # Skip interim
+    #         smart_format=True,
+    #         endpointing_ms=300,
+            
+    #     ),
+    #     llm=openai.LLM(
+    #         model="gpt-3.5-turbo",
+    #         timeout=12.0,
+    #         temperature=0.1,
+    #         max_completion_tokens=60,
+    #     ),
+    #       tts=elevenlabs.TTS(
+    #           model="eleven_turbo_v2_5",
+    #           voice_id="EXAVITQu4vr4xnSDxMaL",  # "Rachel" voice
+    #       ),
+    #     vad=silero.VAD.load(
+    #         min_speech_duration=0.15,
+    #         min_silence_duration=0.2,   
+    #         activation_threshold=0.4,
+    #         max_buffered_speech=25.0,
+    #     ),
+    #     allow_interruptions=True,
+    #     min_endpointing_delay=0.1,
+    # )
     # session = AgentSession(
     #     stt=deepgram.STT(
     #         model="nova-2-phonecall",
@@ -760,10 +767,10 @@ async def entrypoint(ctx: JobContext):
     await session.start(room=ctx.room, agent=restaurant_agent)
 
     # Opening greeting
-    await session.say(
-        "Hi, thanks for calling White Palace Grill. "
-        "How can I help you today with an order or a reservation?"
-    )
+    # await session.say(
+    #     "Hi, thanks for calling White Palace Grill. "
+    #     "How can I help you today with an order or a reservation?"
+    # )
 
     print("✅ Agent started and ready")
 
