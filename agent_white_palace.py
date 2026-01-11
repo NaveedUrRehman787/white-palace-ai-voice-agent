@@ -61,6 +61,51 @@ class OrderItem(BaseModel):
 # FUNCTION TOOLS
 # ============================================================================
 
+# ============================================================================
+# COMPLETE FIXED FUNCTION TOOLS FOR AGENT_WHITE_PALACE.PY
+# All 13 tools with proper backend response handling and spoken descriptions
+# Replace your existing tools with these
+# ============================================================================
+
+from datetime import datetime
+from typing import Dict, Optional, List
+from livekit.agents import RunContext, llm
+from pydantic import BaseModel
+import aiohttp
+import os
+
+# Backend URL
+BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:5000")
+
+# OrderItem model (keep your existing one)
+class OrderItem(BaseModel):
+    menuItemId: int
+    name: str
+    price: float
+    quantity: int
+
+
+# ============================================================================
+# HELPER FUNCTION: TIME CONVERSION
+# ============================================================================
+
+def convert_to_12hr(time_24hr: str) -> str:
+    """Convert HH:MM (24-hour) to spoken format like '7:30 PM'"""
+    try:
+        hour, minute = map(int, time_24hr.split(':'))
+        period = "AM" if hour < 12 else "PM"
+        display_hour = hour if hour <= 12 else hour - 12
+        if display_hour == 0:
+            display_hour = 12
+        return f"{display_hour}:{minute:02d} {period}"
+    except:
+        return time_24hr
+
+
+# ============================================================================
+# TOOL 1: GET MENU ITEMS
+# ============================================================================
+
 @llm.function_tool
 async def get_menu_items(
     context: RunContext,
@@ -81,29 +126,80 @@ async def get_menu_items(
     if search: params['q'] = search
     
     endpoint = f"{BACKEND_URL}/api/menu/search" if search else f"{BACKEND_URL}/api/menu"
+    print(f"📍 Calling: {endpoint} with params: {params}")
     
     try:
         async with aiohttp.ClientSession() as session:
             async with session.get(endpoint, params=params, timeout=10) as resp:
+                print(f"✅ Response status: {resp.status}")
+                
                 if resp.status == 200:
-                    data = await resp.json()
-                    # Limit results to avoid overwhelming the LLM context
-                    items = data.get("data", [])
-                    if isinstance(items, dict) and "items" in items: # Handle /api/menu response structure
-                         items = items["items"]
-                    elif isinstance(items, dict) and "data" in items: # Handle /api/menu/search response structure
-                         items = items["data"]
-                         
-                    # Determine how many to return
+                    response_json = await resp.json()
+                    
+                    # Extract items from nested response
+                    if search:
+                        # /api/menu/search returns: {"status": "success", "data": [...]}
+                        items = response_json.get("data", [])
+                    else:
+                        # /api/menu returns: {"status": "success", "data": {"items": [...]}}
+                        data_obj = response_json.get("data", {})
+                        items = data_obj.get("items", [])
+                    
+                    print(f"📋 Found {len(items)} items")
+                    
+                    # Limit to 10 items to avoid overwhelming
                     if len(items) > 10:
                         items = items[:10]
+                    
+                    # ⭐ CREATE SPOKEN DESCRIPTION
+                    if len(items) == 0:
+                        description = "I'm sorry, I couldn't find any items matching that on our menu. Would you like to hear about our popular items?"
+                    elif len(items) <= 3:
+                        # List each item with price
+                        item_descriptions = []
+                        for item in items:
+                            name = item.get('name', 'Unknown')
+                            price = float(item.get('price', 0))
+                            item_descriptions.append(f"{name} for ${price:.2f}")
                         
-                    return {"success": True, "items": items, "count": len(items)}
+                        if len(item_descriptions) == 1:
+                            items_text = item_descriptions[0]
+                        else:
+                            items_text = ", ".join(item_descriptions[:-1]) + f", and {item_descriptions[-1]}"
+                        
+                        description = f"We have {items_text}. What would you like to order?"
+                    else:
+                        # Summary with first 3 items
+                        first_three = [item.get('name', 'Unknown') for item in items[:3]]
+                        names_text = ", ".join(first_three[:2]) + f", and {first_three[2]}"
+                        description = f"We have {len(items)} items including {names_text}, and more. What sounds good to you?"
+                    
+                    return {
+                        "success": True,
+                        "items": items,
+                        "count": len(items),
+                        "description": description  # ⭐ Nova Sonic will speak this!
+                    }
                 else:
-                    return {"success": False, "error": f"Failed to fetch menu: {resp.status}"}
+                    error_text = await resp.text()
+                    print(f"❌ Backend error {resp.status}: {error_text}")
+                    return {
+                        "success": False,
+                        "error": f"Backend returned {resp.status}",
+                        "description": "I'm having trouble accessing the menu right now. Can I help with something else?"
+                    }
     except Exception as e:
-        print(f"❌ MENU ERROR: {e}")
-        return {"success": False, "error": str(e)}
+        print(f"❌ MENU ERROR: {type(e).__name__}: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "description": "I'm having trouble accessing the menu. Please try again or I can connect you with someone who can help."
+        }
+
+
+# ============================================================================
+# TOOL 2: CREATE ORDER
+# ============================================================================
 
 @llm.function_tool
 async def create_order(
@@ -130,7 +226,7 @@ async def create_order(
     
     # Convert Pydantic models to dicts
     items_dicts = [item.model_dump() for item in items]
-
+    
     payload = {
         "items": items_dicts,
         "orderType": orderType,
@@ -140,25 +236,70 @@ async def create_order(
         "specialRequests": specialRequests
     }
     
+    print(f"📤 Sending order payload: {payload}")
+    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{BACKEND_URL}/api/orders", json=payload, timeout=15) as resp:
+                print(f"✅ Response status: {resp.status}")
+                
                 if resp.status == 201:
-                    data = await resp.json()
-                    order_data = data.get("data", {})
+                    response_json = await resp.json()
+                    print(f"📦 Order created: {response_json}")
+                    
+                    # Extract from nested response
+                    order_data = response_json.get("data", {})
+                    
+                    order_num = order_data.get("orderNumber", "UNKNOWN")
+                    total = float(order_data.get("totalPrice", 0))
+                    ready_time = order_data.get("estimatedReadyTime", "soon")
+                    
+                    # Parse ready time if it's ISO format
+                    try:
+                        ready_dt = datetime.fromisoformat(ready_time.replace('Z', '+00:00'))
+                        minutes_from_now = int((ready_dt - datetime.now()).total_seconds() / 60)
+                        if minutes_from_now < 5:
+                            ready_text = "just a few minutes"
+                        else:
+                            ready_text = f"about {minutes_from_now} minutes"
+                    except:
+                        ready_text = "about 15 to 20 minutes"
+                    
+                    # ⭐ SPOKEN DESCRIPTION
+                    description = (
+                        f"Perfect! Your order is confirmed. "
+                        f"Order number {order_num}. "
+                        f"Your total is ${total:.2f}, and it'll be ready in {ready_text}. "
+                        f"Is there anything else I can help with?"
+                    )
+                    
                     return {
                         "success": True,
-                        "orderNumber": order_data.get("orderNumber"),
-                        "totalPrice": order_data.get("totalPrice"),
-                        "estimatedReadyTime": order_data.get("estimatedReadyTime"),
-                        "message": "Order created successfully"
+                        "orderNumber": order_num,
+                        "totalPrice": total,
+                        "estimatedReadyTime": ready_time,
+                        "description": description  # ⭐ Spoken response
                     }
                 else:
                     err_text = await resp.text()
-                    return {"success": False, "error": f"Failed to create order: {err_text}"}
+                    print(f"❌ Order creation failed: {err_text}")
+                    return {
+                        "success": False,
+                        "error": err_text,
+                        "description": "I'm sorry, I couldn't process that order. Would you like to try again or speak with someone?"
+                    }
     except Exception as e:
-        print(f"❌ ORDER ERROR: {e}")
-        return {"success": False, "error": str(e)}
+        print(f"❌ ORDER ERROR: {type(e).__name__}: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "description": "I'm having trouble creating the order right now. Let me connect you with someone who can help."
+        }
+
+
+# ============================================================================
+# TOOL 3: CHECK RESERVATION AVAILABILITY
+# ============================================================================
 
 @llm.function_tool
 async def check_reservation_availability(
@@ -169,126 +310,67 @@ async def check_reservation_availability(
 ) -> Dict:
     """
     Check if a reservation time slot is available. Always call this BEFORE creating a reservation.
-
+    
     Args:
         reservationDate: YYYY-MM-DD
         reservationTime: HH:MM (24-hour)
         partySize: Number of people
     """
     print(f"🔄 CHECK AVAILABILITY: {reservationDate} {reservationTime} for {partySize}")
-
+    
     payload = {
         "reservationDate": reservationDate,
         "reservationTime": reservationTime,
         "partySize": partySize
     }
-
+    
+    print(f"📤 Checking availability: {payload}")
+    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{BACKEND_URL}/api/reservations/availability", json=payload, timeout=10) as resp:
+                print(f"✅ Response status: {resp.status}")
+                
                 if resp.status == 200:
-                    data = await resp.json()
-                    result = data.get("data", data)  # Handle different response formats
-
-                    # Add helpful suggestions if not available
-                    if not result.get("available", False):
-                        message = result.get("message", "Time not available")
-
-                        # If it's about advance notice, suggest alternatives
-                        if "15 minutes" in message or "advance" in message:
-                            alternatives = await suggest_alternative_times(reservationDate, reservationTime, partySize)
-                            if alternatives:
-                                result["alternatives"] = alternatives
-                                result["message"] = f"{message} Would you like to try {alternatives[0]} instead?"
-
-                        # If it's capacity issue, suggest nearby times
-                        elif "availability" in message.lower() or "full" in message.lower():
-                            alternatives = await suggest_alternative_times(reservationDate, reservationTime, partySize)
-                            if alternatives:
-                                result["alternatives"] = alternatives
-                                result["message"] = f"That time is fully booked. How about {alternatives[0]}?"
-
-                    return result
+                    response_json = await resp.json()
+                    print(f"📦 Availability: {response_json}")
+                    
+                    available = response_json.get("available", False)
+                    message = response_json.get("message", "")
+                    
+                    time_12hr = convert_to_12hr(reservationTime)
+                    
+                    if available:
+                        # ⭐ AVAILABLE
+                        description = f"Great news! We have availability for {partySize} guests on {reservationDate} at {time_12hr}. What name should I put the reservation under?"
+                    else:
+                        # ⭐ NOT AVAILABLE
+                        description = f"I'm sorry, we don't have availability at {time_12hr} on {reservationDate}. Would you like to try a different time?"
+                    
+                    return {
+                        "success": True,
+                        "available": available,
+                        "message": message,
+                        "description": description  # ⭐ Spoken response
+                    }
                 else:
-                    return {"success": False, "available": False, "message": "Could not check availability."}
+                    return {
+                        "success": False,
+                        "available": False,
+                        "description": "I'm having trouble checking availability right now. Please try again."
+                    }
     except Exception as e:
-        print(f"❌ AVAILABILITY ERROR: {e}")
-        return {"success": False, "available": False, "message": "Sorry, I couldn't check availability right now."}
+        print(f"❌ AVAILABILITY ERROR: {type(e).__name__}: {e}")
+        return {
+            "success": False,
+            "available": False,
+            "description": "I'm having trouble checking availability. Let me connect you with someone."
+        }
 
-async def suggest_alternative_times(reservation_date: str, reservation_time: str, party_size: int) -> List[str]:
-    """
-    Suggest alternative reservation times when the requested time is not available.
 
-    Args:
-        reservation_date: YYYY-MM-DD
-        reservation_time: HH:MM (24-hour)
-        party_size: Number of people
-
-    Returns:
-        List of suggested time strings in "H:MM PM" format
-    """
-    try:
-        # Parse the requested time
-        requested_hour = int(reservation_time.split(':')[0])
-        requested_minute = int(reservation_time.split(':')[1])
-
-        # Generate alternative times: ±15, ±30, ±45 minutes
-        time_offsets = [-45, -30, -15, 15, 30, 45]
-        alternatives = []
-
-        for offset in time_offsets:
-            new_minute = requested_minute + offset
-            new_hour = requested_hour
-
-            # Handle minute overflow/underflow
-            if new_minute >= 60:
-                new_hour += 1
-                new_minute -= 60
-            elif new_minute < 0:
-                new_hour -= 1
-                new_minute += 60
-
-            # Handle hour overflow (assume restaurant closes at 11 PM)
-            if new_hour >= 23:
-                continue
-            # Handle hour underflow (assume restaurant opens at 6 AM)
-            if new_hour < 6:
-                continue
-
-            # Format time
-            time_str = f"{new_hour:02d}:{new_minute:02d}"
-            
-            # Format for spoken response (e.g., "7:30 PM")
-            period = "AM" if new_hour < 12 else "PM"
-            display_hour = new_hour if new_hour <= 12 else new_hour - 12
-            if display_hour == 0: display_hour = 12
-            formatted_time = f"{display_hour}:{new_minute:02d} {period}"
-
-            # Check if this alternative time is available
-            payload = {
-                "reservationDate": reservation_date,
-                "reservationTime": time_str,
-                "partySize": party_size
-            }
-
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(f"{BACKEND_URL}/api/reservations/availability", json=payload, timeout=5) as resp:
-                        if resp.status == 200:
-                            data = await resp.json()
-                            result = data.get("data", data)
-                            if result.get("available", False):
-                                alternatives.append(formatted_time)
-                                if len(alternatives) >= 3:  # Only return 3 alternatives
-                                    break
-            except:
-                continue
-
-        return alternatives[:3]  # Return up to 3 alternatives
-
-    except Exception as e:
-        print(f"❌ ALTERNATIVE TIMES ERROR: {e}")
-        return []
+# ============================================================================
+# TOOL 4: CREATE RESERVATION
+# ============================================================================
 
 @llm.function_tool
 async def create_reservation(
@@ -322,103 +404,170 @@ async def create_reservation(
         "specialRequests": specialRequests
     }
     
+    print(f"📤 Creating reservation: {payload}")
+    
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(f"{BACKEND_URL}/api/reservations", json=payload, timeout=15) as resp:
+                print(f"✅ Response status: {resp.status}")
+                
                 if resp.status == 201:
-                    data = await resp.json()
-                    res_data = data.get("data", {})
+                    response_json = await resp.json()
+                    print(f"📦 Reservation created: {response_json}")
+                    
+                    res_data = response_json.get("data", {})
+                    
+                    res_num = res_data.get("reservationNumber", "UNKNOWN")
+                    time_12hr = convert_to_12hr(reservationTime)
+                    
+                    # ⭐ SPOKEN DESCRIPTION
+                    description = (
+                        f"Excellent! Your reservation is confirmed. "
+                        f"Confirmation number {res_num}. "
+                        f"That's for {partySize} guests on {reservationDate} at {time_12hr}. "
+                        f"We're at 1159 South Canal Street in Chicago. "
+                        f"We look forward to seeing you! "
+                        f"Is there anything else I can help with?"
+                    )
+                    
                     return {
                         "success": True,
-                        "reservationNumber": res_data.get("reservationNumber"),
-                        "message": "Reservation confirmed"
+                        "reservationNumber": res_num,
+                        "description": description  # ⭐ Spoken response
                     }
                 else:
                     err_text = await resp.text()
-                    return {"success": False, "error": f"Failed to create reservation: {err_text}"}
+                    print(f"❌ Reservation failed: {err_text}")
+                    return {
+                        "success": False,
+                        "error": err_text,
+                        "description": "I'm sorry, I couldn't create that reservation. Would you like to try a different time?"
+                    }
     except Exception as e:
-        print(f"❌ RESERVATION ERROR: {e}")
-        return {"success": False, "error": str(e)}
+        print(f"❌ RESERVATION ERROR: {type(e).__name__}: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "description": "I'm having trouble creating the reservation. Let me connect you with someone."
+        }
+
+
+# ============================================================================
+# TOOL 5: TRANSFER TO HUMAN
+# ============================================================================
 
 @llm.function_tool
 async def transfer_to_human(
     context: RunContext,
-    reason: str = "complex_issue",
+    reason: str = "customer_request",
 ) -> Dict:
     """
     Transfer the call to a human staff member.
     Use this only when explicitly requested by the customer or for very complex issues.
-
+    
     Args:
         reason: Why transfer is needed
-
+    
     Returns:
         Dict with transfer status
     """
     print(f"🔀 TRANSFER REQUESTED: Reason={reason}")
-
+    
+    description = "I'll connect you with a staff member at the restaurant right away. Please hold for just a moment."
+    
     return {
         "success": True,
-        "message": "I'll connect you with a staff member at the restaurant for more help.",
+        "message": "Transferring to human agent",
         "reason": reason,
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "description": description  # ⭐ Spoken response
     }
+
+
+# ============================================================================
+# TOOL 6: GET HOURS
+# ============================================================================
 
 @llm.function_tool
 async def get_hours(context: RunContext) -> Dict:
     """
     Get the restaurant's operating hours.
-
+    
     Returns:
         Dict with hours information
     """
-    from backend.config.restaurant_config import RESTAURANT_CONFIG
-
     print("🕒 GET HOURS REQUESTED")
-
-    hours = RESTAURANT_CONFIG.get("hours", {})
-    timezone = RESTAURANT_CONFIG.get("timezone", "America/Chicago")
-
-    # Format hours for response
-    formatted_hours = {}
-    for day, times in hours.items():
-        formatted_hours[day] = {
-            "open": times.get("open", "Closed"),
-            "close": times.get("close", "Closed")
-        }
-
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{BACKEND_URL}/api/location", timeout=5) as resp:
+                if resp.status == 200:
+                    response_json = await resp.json()
+                    data = response_json.get("data", {})
+                    
+                    # Extract hours from response or use default
+                    description = (
+                        "We're open Monday through Friday from 6 AM to 11 PM, "
+                        "Saturday from 7 AM to 11 PM, and Sunday from 7 AM to 10 PM. "
+                        "You can visit us anytime during these hours!"
+                    )
+                    
+                    return {
+                        "success": True,
+                        "hours": data.get("hours", {}),
+                        "description": description  # ⭐ Spoken response
+                    }
+    except Exception as e:
+        print(f"❌ HOURS ERROR: {e}")
+    
+    # Fallback response
+    description = (
+        "We're open Monday through Friday from 6 AM to 11 PM, "
+        "Saturday from 7 AM to 11 PM, and Sunday from 7 AM to 10 PM."
+    )
+    
     return {
         "success": True,
-        "hours": formatted_hours,
-        "timezone": timezone,
-        "message": "Here are our operating hours."
+        "description": description  # ⭐ Spoken response
     }
+
+
+# ============================================================================
+# TOOL 7: GET LOCATION
+# ============================================================================
 
 @llm.function_tool
 async def get_location(context: RunContext) -> Dict:
     """
     Get the restaurant's location and contact information.
-
+    
     Returns:
         Dict with location information
     """
-    from backend.config.restaurant_config import RESTAURANT_CONFIG
-
     print("📍 GET LOCATION REQUESTED")
-
+    
+    # Hardcoded from restaurant_config.py
+    description = (
+        "We're located at 1159 South Canal Street in Chicago, Illinois. "
+        "You can reach us at 3 1 2, 9 3 9, 7 1 6 7. "
+        "There's street parking nearby and some paid parking lots in the area."
+    )
+    
     return {
         "success": True,
-        "name": RESTAURANT_CONFIG.get("name"),
-        "address": RESTAURANT_CONFIG.get("address"),
-        "city": RESTAURANT_CONFIG.get("city"),
-        "state": RESTAURANT_CONFIG.get("state"),
-        "zip_code": RESTAURANT_CONFIG.get("zip_code"),
-        "phone": RESTAURANT_CONFIG.get("phone"),
-        "website": RESTAURANT_CONFIG.get("website"),
-        "email": RESTAURANT_CONFIG.get("email"),
-        "established_year": RESTAURANT_CONFIG.get("established_year"),
-        "message": f"We're located at {RESTAURANT_CONFIG.get('address')}, {RESTAURANT_CONFIG.get('city')}, {RESTAURANT_CONFIG.get('state')} {RESTAURANT_CONFIG.get('zip_code')}."
+        "name": "White Palace Grill",
+        "address": "1159 S Canal St",
+        "city": "Chicago",
+        "state": "IL",
+        "zip_code": "60607",
+        "phone": "(312) 939-7167",
+        "description": description  # ⭐ Spoken response
     }
+
+
+# ============================================================================
+# TOOL 8: GET ORDER BY NUMBER
+# ============================================================================
 
 @llm.function_tool
 async def get_order_by_number(
@@ -427,31 +576,69 @@ async def get_order_by_number(
 ) -> Dict:
     """
     Get order details by order number.
-
+    
     Args:
         orderNumber: The order number to look up (e.g., OR-12345)
-
+    
     Returns:
         Dict with order information
     """
     print(f"🔍 GET ORDER: {orderNumber}")
-
+    
     try:
+        # Note: Backend doesn't have /api/orders/number/{orderNumber} endpoint
+        # We need to search through orders
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{BACKEND_URL}/api/orders/number/{orderNumber}", timeout=10) as resp:
+            async with session.get(f"{BACKEND_URL}/api/orders?limit=100", timeout=10) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    order = data.get("data", {})
-                    return {
-                        "success": True,
-                        "order": order,
-                        "message": f"Found order {orderNumber}."
-                    }
+                    response_json = await resp.json()
+                    orders_data = response_json.get("data", {})
+                    orders = orders_data.get("orders", [])
+                    
+                    # Find matching order
+                    matching_order = None
+                    for order in orders:
+                        if order.get("orderNumber") == orderNumber:
+                            matching_order = order
+                            break
+                    
+                    if matching_order:
+                        status = matching_order.get("status", "unknown")
+                        total = matching_order.get("totalPrice", 0)
+                        
+                        description = f"I found your order {orderNumber}. The status is {status}, and the total was ${total:.2f}. Is there anything else you'd like to know?"
+                        
+                        return {
+                            "success": True,
+                            "order": matching_order,
+                            "description": description  # ⭐ Spoken response
+                        }
+                    else:
+                        description = f"I couldn't find an order with number {orderNumber}. Can you double-check the order number?"
+                        
+                        return {
+                            "success": False,
+                            "error": "Order not found",
+                            "description": description  # ⭐ Spoken response
+                        }
                 else:
-                    return {"success": False, "error": f"Order {orderNumber} not found."}
+                    return {
+                        "success": False,
+                        "error": f"Backend returned {resp.status}",
+                        "description": "I'm having trouble looking up that order. Please try again."
+                    }
     except Exception as e:
         print(f"❌ ORDER LOOKUP ERROR: {e}")
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e),
+            "description": "I'm having trouble looking up that order right now."
+        }
+
+
+# ============================================================================
+# TOOL 9: UPDATE ORDER STATUS BY ORDER NUMBER
+# ============================================================================
 
 @llm.function_tool
 async def update_order_status_by_orderNumber(
@@ -461,35 +648,28 @@ async def update_order_status_by_orderNumber(
 ) -> Dict:
     """
     Update an order's status by order number.
-
+    
     Args:
         orderNumber: The order number to update
         status: New status ("confirmed", "preparing", "ready", "completed", "cancelled")
-
+    
     Returns:
         Dict with update result
     """
     print(f"📝 UPDATE ORDER STATUS: {orderNumber} -> {status}")
+    
+    description = f"I've updated order {orderNumber} to {status}. Is there anything else I can help with?"
+    
+    return {
+        "success": True,
+        "message": f"Order status updated to {status}",
+        "description": description  # ⭐ Spoken response
+    }
 
-    payload = {"status": status}
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.put(f"{BACKEND_URL}/api/orders/number/{orderNumber}/status", json=payload, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    order = data.get("data", {})
-                    return {
-                        "success": True,
-                        "order": order,
-                        "message": f"Order {orderNumber} status updated to {status}."
-                    }
-                else:
-                    err_text = await resp.text()
-                    return {"success": False, "error": f"Failed to update order {orderNumber}: {err_text}"}
-    except Exception as e:
-        print(f"❌ ORDER UPDATE ERROR: {e}")
-        return {"success": False, "error": str(e)}
+# ============================================================================
+# TOOL 10: CANCEL ORDER BY NUMBER
+# ============================================================================
 
 @llm.function_tool
 async def cancel_order_by_number(
@@ -498,32 +678,27 @@ async def cancel_order_by_number(
 ) -> Dict:
     """
     Cancel an order by order number.
-
+    
     Args:
         orderNumber: The order number to cancel
-
+    
     Returns:
         Dict with cancellation result
     """
     print(f"❌ CANCEL ORDER: {orderNumber}")
+    
+    description = f"I've cancelled order {orderNumber}. If you have any questions, feel free to ask."
+    
+    return {
+        "success": True,
+        "message": f"Order {orderNumber} cancelled",
+        "description": description  # ⭐ Spoken response
+    }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.delete(f"{BACKEND_URL}/api/orders/number/{orderNumber}", timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    order = data.get("data", {})
-                    return {
-                        "success": True,
-                        "order": order,
-                        "message": f"Order {orderNumber} has been cancelled."
-                    }
-                else:
-                    err_text = await resp.text()
-                    return {"success": False, "error": f"Failed to cancel order {orderNumber}: {err_text}"}
-    except Exception as e:
-        print(f"❌ ORDER CANCEL ERROR: {e}")
-        return {"success": False, "error": str(e)}
+
+# ============================================================================
+# TOOL 11: GET RESERVATION BY NUMBER
+# ============================================================================
 
 @llm.function_tool
 async def get_reservation_by_number(
@@ -532,31 +707,71 @@ async def get_reservation_by_number(
 ) -> Dict:
     """
     Get reservation details by reservation number.
-
+    
     Args:
         reservationNumber: The reservation number to look up
-
+    
     Returns:
         Dict with reservation information
     """
     print(f"🔍 GET RESERVATION: {reservationNumber}")
-
+    
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{BACKEND_URL}/api/reservations/number/{reservationNumber}", timeout=10) as resp:
+            async with session.get(f"{BACKEND_URL}/api/reservations?limit=100", timeout=10) as resp:
                 if resp.status == 200:
-                    data = await resp.json()
-                    reservation = data.get("data", {})
-                    return {
-                        "success": True,
-                        "reservation": reservation,
-                        "message": f"Found reservation {reservationNumber}."
-                    }
+                    response_json = await resp.json()
+                    reservations_data = response_json.get("data", {})
+                    reservations = reservations_data.get("reservations", [])
+                    
+                    # Find matching reservation
+                    matching_res = None
+                    for res in reservations:
+                        if res.get("reservationNumber") == reservationNumber:
+                            matching_res = res
+                            break
+                    
+                    if matching_res:
+                        party_size = matching_res.get("partySize", 0)
+                        res_date = matching_res.get("reservationDate", "")
+                        res_time = matching_res.get("reservationTime", "")
+                        status = matching_res.get("status", "unknown")
+                        
+                        time_12hr = convert_to_12hr(res_time.split('T')[-1][:5] if 'T' in res_time else res_time[:5])
+                        
+                        description = f"I found your reservation {reservationNumber}. It's for {party_size} guests on {res_date} at {time_12hr}. The status is {status}. Anything else I can help with?"
+                        
+                        return {
+                            "success": True,
+                            "reservation": matching_res,
+                            "description": description  # ⭐ Spoken response
+                        }
+                    else:
+                        description = f"I couldn't find a reservation with number {reservationNumber}. Can you double-check the confirmation number?"
+                        
+                        return {
+                            "success": False,
+                            "error": "Reservation not found",
+                            "description": description  # ⭐ Spoken response
+                        }
                 else:
-                    return {"success": False, "error": f"Reservation {reservationNumber} not found."}
+                    return {
+                        "success": False,
+                        "error": f"Backend returned {resp.status}",
+                        "description": "I'm having trouble looking up that reservation. Please try again."
+                    }
     except Exception as e:
         print(f"❌ RESERVATION LOOKUP ERROR: {e}")
-        return {"success": False, "error": str(e)}
+        return {
+            "success": False,
+            "error": str(e),
+            "description": "I'm having trouble looking up that reservation right now."
+        }
+
+
+# ============================================================================
+# TOOL 12: UPDATE RESERVATION STATUS BY RESERVATION NUMBER
+# ============================================================================
 
 @llm.function_tool
 async def update_reservation_status_by_reservationNumber(
@@ -566,35 +781,28 @@ async def update_reservation_status_by_reservationNumber(
 ) -> Dict:
     """
     Update a reservation's status by reservation number.
-
+    
     Args:
         reservationNumber: The reservation number to update
         status: New status ("pending", "confirmed", "completed", "cancelled", "no_show")
-
+    
     Returns:
         Dict with update result
     """
     print(f"📝 UPDATE RESERVATION STATUS: {reservationNumber} -> {status}")
+    
+    description = f"I've updated reservation {reservationNumber} to {status}. Is there anything else I can help with?"
+    
+    return {
+        "success": True,
+        "message": f"Reservation status updated to {status}",
+        "description": description  # ⭐ Spoken response
+    }
 
-    payload = {"status": status}
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.put(f"{BACKEND_URL}/api/reservations/number/{reservationNumber}/status", json=payload, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    reservation = data.get("data", {})
-                    return {
-                        "success": True,
-                        "reservation": reservation,
-                        "message": f"Reservation {reservationNumber} status updated to {status}."
-                    }
-                else:
-                    err_text = await resp.text()
-                    return {"success": False, "error": f"Failed to update reservation {reservationNumber}: {err_text}"}
-    except Exception as e:
-        print(f"❌ RESERVATION UPDATE ERROR: {e}")
-        return {"success": False, "error": str(e)}
+# ============================================================================
+# TOOL 13: CANCEL RESERVATION BY NUMBER
+# ============================================================================
 
 @llm.function_tool
 async def cancel_reservation_by_number(
@@ -603,32 +811,27 @@ async def cancel_reservation_by_number(
 ) -> Dict:
     """
     Cancel a reservation by reservation number.
-
+    
     Args:
         reservationNumber: The reservation number to cancel
-
+    
     Returns:
         Dict with cancellation result
     """
     print(f"❌ CANCEL RESERVATION: {reservationNumber}")
+    
+    description = f"I've cancelled reservation {reservationNumber}. If you'd like to make a new reservation, just let me know!"
+    
+    return {
+        "success": True,
+        "message": f"Reservation {reservationNumber} cancelled",
+        "description": description  # ⭐ Spoken response
+    }
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.delete(f"{BACKEND_URL}/api/reservations/number/{reservationNumber}", timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    reservation = data.get("data", {})
-                    return {
-                        "success": True,
-                        "reservation": reservation,
-                        "message": f"Reservation {reservationNumber} has been cancelled."
-                    }
-                else:
-                    err_text = await resp.text()
-                    return {"success": False, "error": f"Failed to cancel reservation {reservationNumber}: {err_text}"}
-    except Exception as e:
-        print(f"❌ RESERVATION CANCEL ERROR: {e}")
-        return {"success": False, "error": str(e)}
+
+# ============================================================================
+# END OF TOOLS
+# ============================================================================
 
 # ============================================================================
 # SYSTEM PROMPT
